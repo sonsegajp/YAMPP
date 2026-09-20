@@ -1,0 +1,13 @@
+const fs = require('node:fs');
+const path = require('node:path');
+const root = path.resolve(__dirname,'../../..');
+const output = path.join(root,'build/workshop/MeleeWorkshop-win32-x64');
+fs.mkdirSync(output,{recursive:true});
+fs.cpSync(path.join(__dirname,'node_modules/electron/dist'),output,{recursive:true});
+fs.renameSync(path.join(output,'electron.exe'),path.join(output,'Melee Workshop.exe'));
+const app = path.join(output,'resources/app');
+fs.mkdirSync(app,{recursive:true});
+for (const name of ['main.cjs','preload.cjs','check.cjs','check-community.cjs','check-costume.cjs']) fs.copyFileSync(path.join(__dirname,name),path.join(app,name));
+fs.writeFileSync(path.join(app,'package.json'),JSON.stringify({name:'melee-workshop',productName:'Melee Workshop',version:'0.1.0',main:'main.cjs'}));
+fs.cpSync(path.join(__dirname,'../web'),path.join(app,'ui'),{recursive:true});
+console.log(path.join(output,'Melee Workshop.exe'));

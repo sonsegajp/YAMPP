@@ -1,0 +1,15 @@
+{
+  "name": "melee-workshop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Melee character and stage desktop editor",
+  "main": "main.cjs",
+  "scripts": {
+    "start": "node launch.cjs",
+    "check": "node launch.cjs --workshop-check",
+    "package": "node package.cjs"
+  },
+  "devDependencies": {
+    "electron": "44.2.0"
+  }
+}

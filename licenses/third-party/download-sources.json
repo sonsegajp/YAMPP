@@ -1,0 +1,17 @@
+[
+  {
+    "file": "Dawn.txt",
+    "source": "https://raw.githubusercontent.com/encounter/dawn/1155e0ed531126f33a1279afa029349651ca1c93/LICENSE",
+    "sha256": "0493f897193af1796d5054659f45ec7d4c5af648fa67a99f01d30e55cc805abc"
+  },
+  {
+    "file": "nod-MIT.txt",
+    "source": "https://raw.githubusercontent.com/encounter/nod/v2.0.0-alpha.10/LICENSE-MIT",
+    "sha256": "544ffe9befaefa6b59ab1fdde58789069ba7c1b65432bdea273a16b2117909b7"
+  },
+  {
+    "file": "nod-Apache-2.0.txt",
+    "source": "https://raw.githubusercontent.com/encounter/nod/v2.0.0-alpha.10/LICENSE-APACHE",
+    "sha256": "fd363f1eb5135402a2e66f4a6173e6eff06daabe79d150acd7c669d33b985b4e"
+  }
+]

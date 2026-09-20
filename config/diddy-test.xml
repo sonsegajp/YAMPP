@@ -1,0 +1,2 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<melee-runtime-profile schema="1" executable="build/diddy-test/melee-diddy.exe" renderer="build/diddy-test/melee_aurora_diddy.dll"/>

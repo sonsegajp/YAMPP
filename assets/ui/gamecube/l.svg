@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+<title>GameCube l button</title>
+<g fill="#BBC0CA" stroke="#172132" stroke-width="9" stroke-linejoin="round"><path d="M 20 42 C 25 31 41 25 67 26 C 89 27 103 33 109 44 L 104 83 C 103 91 96 95 87 93 L 31 85 C 20 84 15 79 15 72 Z"/></g>
+<g fill="none" stroke="#F0EAD6" stroke-width="2.6" stroke-linejoin="round"><path d="M 20 42 C 25 31 41 25 67 26 C 89 27 103 33 109 44 L 104 83 C 103 91 96 95 87 93 L 31 85 C 20 84 15 79 15 72 Z"/></g>
+<path d="M -7 -12 V 12 H 8" transform="translate(62 58) scale(1.38)" fill="none" stroke="#172132" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

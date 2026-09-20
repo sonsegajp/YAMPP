@@ -1,0 +1,11 @@
+<?xml version='1.0' encoding='utf-8'?>
+<melee-project schema="1" discId="GALE01" revision="2" dolSha1="08e0bf20134dfcb260699671004527b2d6bb1a45">
+  <assets directory="data/GALE01" manifest="data/GALE01/manifest.xml" />
+  <runtime executable="build/native-game/melee.exe" developmentExecutable="build/native-game/melee-mod.exe" renderer="build/pc/bin/melee_aurora_v2.dll" developmentRenderer="build/pc/bin/melee_aurora_mod.dll" />
+  <user disc="user/disc.xml" settings="user/settings.xml" memoryCard="user/saves/MemoryCardA.raw" mods="user/mods" modsEnabled="0" cache="user/playtest-cache" />
+  <dependencies>
+    <dependency name="melee" url="https://github.com/doldecomp/melee.git" commit="05a1394faea2aac458e4bdd030621d8a5631ae62" />
+    <dependency name="aurora" url="https://github.com/encounter/aurora.git" commit="749d6ee7a22bdfab78c8ece9047bca5d79aa72ca" />
+    <dependency name="HSDLib" url="https://github.com/Ploaj/HSDLib.git" commit="85567e40797de3c820a55476eca54c704921a848" />
+  </dependencies>
+</melee-project>

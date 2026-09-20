@@ -1,0 +1,9 @@
+{
+  "package": "Microsoft.NETCore.App.Runtime.win-x64",
+  "version": "8.0.26",
+  "source": "https://www.nuget.org/packages/Microsoft.NETCore.App.Runtime.win-x64/8.0.26",
+  "notices": [
+    "LICENSE.TXT",
+    "THIRD-PARTY-NOTICES.TXT"
+  ]
+}

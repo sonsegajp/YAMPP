@@ -1,0 +1,19 @@
+{
+  "package": "System.ServiceModel.Syndication/8.0.0",
+  "authors": "Microsoft",
+  "copyright": "\u00a9 Microsoft Corporation. All rights reserved.",
+  "licenseExpression": "MIT",
+  "repository": "https://github.com/dotnet/runtime",
+  "commit": "5535e31a712343a63f5d7d796cd874e563e5ac14",
+  "upstreamLicense": null,
+  "files": [
+    {
+      "name": "LICENSE.TXT",
+      "sha256": "d7a68596ab69b06f51ca278a6545148e4269a9381c26d597c13df5d88e08cf5b"
+    },
+    {
+      "name": "THIRD-PARTY-NOTICES.TXT",
+      "sha256": "19c19dcac9f3ee6302cfbc6745bb8e79f08efc4c933eb8dc5509bf14b88347ec"
+    }
+  ]
+}

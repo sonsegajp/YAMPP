@@ -1,0 +1,19 @@
+{
+  "package": "runtime.osx-x64.runtime.native.System.IO.Ports/8.0.0",
+  "authors": "Microsoft",
+  "copyright": "\u00a9 Microsoft Corporation. All rights reserved.",
+  "licenseExpression": "MIT",
+  "repository": "https://github.com/dotnet/runtime",
+  "commit": "5535e31a712343a63f5d7d796cd874e563e5ac14",
+  "upstreamLicense": null,
+  "files": [
+    {
+      "name": "LICENSE.TXT",
+      "sha256": "cfc21f5e8bd655ae997eec916138b707b1d290b83272c02a95c9f821b8c87310"
+    },
+    {
+      "name": "THIRD-PARTY-NOTICES.TXT",
+      "sha256": "7238e7fd468427aa3fe45b1d0cee1c3e2d93ff96692820768521e9780225d473"
+    }
+  ]
+}

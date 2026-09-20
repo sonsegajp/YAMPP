@@ -1,0 +1,19 @@
+{
+  "package": "System.Reflection.DispatchProxy/4.7.1",
+  "authors": "Microsoft",
+  "copyright": "\u00a9 Microsoft Corporation. All rights reserved.",
+  "licenseExpression": "MIT",
+  "repository": "",
+  "commit": "",
+  "upstreamLicense": null,
+  "files": [
+    {
+      "name": "LICENSE.TXT",
+      "sha256": "d7a68596ab69b06f51ca278a6545148e4269a9381c26d597c13df5d88e08cf5b"
+    },
+    {
+      "name": "THIRD-PARTY-NOTICES.TXT",
+      "sha256": "388c07f579998286e5df706a2e68bf6e01100187ccb0ff0310e26c3383f7b2b2"
+    }
+  ]
+}

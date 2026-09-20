@@ -1,0 +1,1004 @@
+{
+  "source": "ModBridge.deps.json and installed NuGet packages",
+  "packages": [
+    {
+      "package": "Microsoft.Bcl.AsyncInterfaces/5.0.0",
+      "authors": "Microsoft",
+      "copyright": "\u00a9 Microsoft Corporation. All rights reserved.",
+      "licenseExpression": "MIT",
+      "repository": "git://github.com/dotnet/runtime",
+      "commit": "cf258a14b70ad9069470a108f13765e0e5988f51",
+      "upstreamLicense": null,
+      "files": [
+        {
+          "name": "LICENSE.TXT",
+          "sha256": "d7a68596ab69b06f51ca278a6545148e4269a9381c26d597c13df5d88e08cf5b"
+        },
+        {
+          "name": "THIRD-PARTY-NOTICES.TXT",
+          "sha256": "78e22d4d24a710d2a09426c09060f3448204778ed506b1da55447a6089b54fae"
+        }
+      ]
+    },
+    {
+      "package": "Microsoft.Extensions.ObjectPool/5.0.10",
+      "authors": "Microsoft",
+      "copyright": "\u00a9 Microsoft Corporation. All rights reserved.",
+      "licenseExpression": "Apache-2.0",
+      "repository": "https://github.com/dotnet/aspnetcore",
+      "commit": "b92c9f50f0333ea661785ba849f303cde6a93844",
+      "upstreamLicense": "https://raw.githubusercontent.com/dotnet/aspnetcore/b92c9f50f0333ea661785ba849f303cde6a93844/LICENSE.txt",
+      "files": [
+        {
+          "name": "THIRD-PARTY-NOTICES.TXT",
+          "sha256": "fcf3e943c68c1bb5b3062d7511c589a96f3821af8cf8c9d1708874d413ea3300"
+        },
+        {
+          "name": "UPSTREAM-LICENSE.txt",
+          "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+        }
+      ]
+    },
+    {
+      "package": "Microsoft.Win32.Registry.AccessControl/8.0.0",
+      "authors": "Microsoft",
+      "copyright": "\u00a9 Microsoft Corporation. All rights reserved.",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/dotnet/runtime",
+      "commit": "5535e31a712343a63f5d7d796cd874e563e5ac14",
+      "upstreamLicense": null,
+      "files": [
+        {
+          "name": "LICENSE.TXT",
+          "sha256": "d7a68596ab69b06f51ca278a6545148e4269a9381c26d597c13df5d88e08cf5b"
+        },
+        {
+          "name": "THIRD-PARTY-NOTICES.TXT",
+          "sha256": "19c19dcac9f3ee6302cfbc6745bb8e79f08efc4c933eb8dc5509bf14b88347ec"
+        }
+      ]
+    },
+    {
+      "package": "Microsoft.Win32.SystemEvents/8.0.0",
+      "authors": "Microsoft",
+      "copyright": "\u00a9 Microsoft Corporation. All rights reserved.",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/dotnet/runtime",
+      "commit": "5535e31a712343a63f5d7d796cd874e563e5ac14",
+      "upstreamLicense": null,
+      "files": [
+        {
+          "name": "LICENSE.TXT",
+          "sha256": "d7a68596ab69b06f51ca278a6545148e4269a9381c26d597c13df5d88e08cf5b"
+        },
+        {
+          "name": "THIRD-PARTY-NOTICES.TXT",
+          "sha256": "19c19dcac9f3ee6302cfbc6745bb8e79f08efc4c933eb8dc5509bf14b88347ec"
+        }
+      ]
+    },
+    {
+      "package": "Microsoft.Windows.Compatibility/8.0.30",
+      "authors": "Microsoft",
+      "copyright": "\u00a9 Microsoft Corporation. All rights reserved.",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/dotnet/windowsdesktop",
+      "commit": "69f0fdb740773a6f766d6ba7e692f5653062c095",
+      "upstreamLicense": "https://raw.githubusercontent.com/dotnet/windowsdesktop/69f0fdb740773a6f766d6ba7e692f5653062c095/LICENSE",
+      "files": [
+        {
+          "name": "UPSTREAM-LICENSE.txt",
+          "sha256": "ae48df11a335dc1a615f4f938b69cba73bcf4485c4f97af49b38efb0f216353b"
+        }
+      ]
+    },
+    {
+      "package": "runtime.linux-arm.runtime.native.System.IO.Ports/8.0.0",
+      "authors": "Microsoft",
+      "copyright": "\u00a9 Microsoft Corporation. All rights reserved.",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/dotnet/runtime",
+      "commit": "5535e31a712343a63f5d7d796cd874e563e5ac14",
+      "upstreamLicense": null,
+      "files": [
+        {
+          "name": "LICENSE.TXT",
+          "sha256": "cfc21f5e8bd655ae997eec916138b707b1d290b83272c02a95c9f821b8c87310"
+        },
+        {
+          "name": "THIRD-PARTY-NOTICES.TXT",
+          "sha256": "7238e7fd468427aa3fe45b1d0cee1c3e2d93ff96692820768521e9780225d473"
+        }
+      ]
+    },
+    {
+      "package": "runtime.linux-arm64.runtime.native.System.IO.Ports/8.0.0",
+      "authors": "Microsoft",
+      "copyright": "\u00a9 Microsoft Corporation. All rights reserved.",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/dotnet/runtime",
+      "commit": "5535e31a712343a63f5d7d796cd874e563e5ac14",
+      "upstreamLicense": null,
+      "files": [
+        {
+          "name": "LICENSE.TXT",
+          "sha256": "cfc21f5e8bd655ae997eec916138b707b1d290b83272c02a95c9f821b8c87310"
+        },
+        {
+          "name": "THIRD-PARTY-NOTICES.TXT",
+          "sha256": "7238e7fd468427aa3fe45b1d0cee1c3e2d93ff96692820768521e9780225d473"
+        }
+      ]
+    },
+    {
+      "package": "runtime.linux-x64.runtime.native.System.IO.Ports/8.0.0",
+      "authors": "Microsoft",
+      "copyright": "\u00a9 Microsoft Corporation. All rights reserved.",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/dotnet/runtime",
+      "commit": "5535e31a712343a63f5d7d796cd874e563e5ac14",
+      "upstreamLicense": null,
+      "files": [
+        {
+          "name": "LICENSE.TXT",
+          "sha256": "cfc21f5e8bd655ae997eec916138b707b1d290b83272c02a95c9f821b8c87310"
+        },
+        {
+          "name": "THIRD-PARTY-NOTICES.TXT",
+          "sha256": "7238e7fd468427aa3fe45b1d0cee1c3e2d93ff96692820768521e9780225d473"
+        }
+      ]
+    },
+    {
+      "package": "runtime.native.System.Data.SqlClient.sni/4.4.0",
+      "authors": "Microsoft",
+      "copyright": "\u00a9 Microsoft Corporation.  All rights reserved.",
+      "licenseExpression": null,
+      "repository": "",
+      "commit": "",
+      "upstreamLicense": null,
+      "files": [
+        {
+          "name": "LICENSE.TXT",
+          "sha256": "d7a68596ab69b06f51ca278a6545148e4269a9381c26d597c13df5d88e08cf5b"
+        },
+        {
+          "name": "THIRD-PARTY-NOTICES.TXT",
+          "sha256": "0ef4dce1f4e8965f19a3b8b2f984f337d5c35e5aaf7f8a36b95aec66c301963a"
+        }
+      ]
+    },
+    {
+      "package": "runtime.native.System.IO.Ports/8.0.0",
+      "authors": "Microsoft",
+      "copyright": "\u00a9 Microsoft Corporation. All rights reserved.",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/dotnet/runtime",
+      "commit": "5535e31a712343a63f5d7d796cd874e563e5ac14",
+      "upstreamLicense": null,
+      "files": [
+        {
+          "name": "LICENSE.TXT",
+          "sha256": "d7a68596ab69b06f51ca278a6545148e4269a9381c26d597c13df5d88e08cf5b"
+        },
+        {
+          "name": "THIRD-PARTY-NOTICES.TXT",
+          "sha256": "19c19dcac9f3ee6302cfbc6745bb8e79f08efc4c933eb8dc5509bf14b88347ec"
+        }
+      ]
+    },
+    {
+      "package": "runtime.osx-arm64.runtime.native.System.IO.Ports/8.0.0",
+      "authors": "Microsoft",
+      "copyright": "\u00a9 Microsoft Corporation. All rights reserved.",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/dotnet/runtime",
+      "commit": "5535e31a712343a63f5d7d796cd874e563e5ac14",
+      "upstreamLicense": null,
+      "files": [
+        {
+          "name": "LICENSE.TXT",
+          "sha256": "cfc21f5e8bd655ae997eec916138b707b1d290b83272c02a95c9f821b8c87310"
+        },
+        {
+          "name": "THIRD-PARTY-NOTICES.TXT",
+          "sha256": "7238e7fd468427aa3fe45b1d0cee1c3e2d93ff96692820768521e9780225d473"
+        }
+      ]
+    },
+    {
+      "package": "runtime.osx-x64.runtime.native.System.IO.Ports/8.0.0",
+      "authors": "Microsoft",
+      "copyright": "\u00a9 Microsoft Corporation. All rights reserved.",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/dotnet/runtime",
+      "commit": "5535e31a712343a63f5d7d796cd874e563e5ac14",
+      "upstreamLicense": null,
+      "files": [
+        {
+          "name": "LICENSE.TXT",
+          "sha256": "cfc21f5e8bd655ae997eec916138b707b1d290b83272c02a95c9f821b8c87310"
+        },
+        {
+          "name": "THIRD-PARTY-NOTICES.TXT",
+          "sha256": "7238e7fd468427aa3fe45b1d0cee1c3e2d93ff96692820768521e9780225d473"
+        }
+      ]
+    },
+    {
+      "package": "runtime.win-arm64.runtime.native.System.Data.SqlClient.sni/4.4.0",
+      "authors": "Microsoft",
+      "copyright": "\u00a9 Microsoft Corporation.  All rights reserved.",
+      "licenseExpression": null,
+      "repository": "",
+      "commit": "",
+      "upstreamLicense": null,
+      "files": [
+        {
+          "name": "dotnet_library_license.txt",
+          "sha256": "f1db688d8481c91a452fabcea5060a23da9ea5088329b58c478a040e2e426297"
+        },
+        {
+          "name": "ThirdPartyNotices.txt",
+          "sha256": "0684b2349427ee28e392ae8914645832e59731dba8a38a984f72b3fb8769c76b"
+        }
+      ]
+    },
+    {
+      "package": "runtime.win-x64.runtime.native.System.Data.SqlClient.sni/4.4.0",
+      "authors": "Microsoft",
+      "copyright": "\u00a9 Microsoft Corporation.  All rights reserved.",
+      "licenseExpression": null,
+      "repository": "",
+      "commit": "",
+      "upstreamLicense": null,
+      "files": [
+        {
+          "name": "dotnet_library_license.txt",
+          "sha256": "f1db688d8481c91a452fabcea5060a23da9ea5088329b58c478a040e2e426297"
+        },
+        {
+          "name": "ThirdPartyNotices.txt",
+          "sha256": "0684b2349427ee28e392ae8914645832e59731dba8a38a984f72b3fb8769c76b"
+        }
+      ]
+    },
+    {
+      "package": "runtime.win-x86.runtime.native.System.Data.SqlClient.sni/4.4.0",
+      "authors": "Microsoft",
+      "copyright": "\u00a9 Microsoft Corporation.  All rights reserved.",
+      "licenseExpression": null,
+      "repository": "",
+      "commit": "",
+      "upstreamLicense": null,
+      "files": [
+        {
+          "name": "dotnet_library_license.txt",
+          "sha256": "f1db688d8481c91a452fabcea5060a23da9ea5088329b58c478a040e2e426297"
+        },
+        {
+          "name": "ThirdPartyNotices.txt",
+          "sha256": "0684b2349427ee28e392ae8914645832e59731dba8a38a984f72b3fb8769c76b"
+        }
+      ]
+    },
+    {
+      "package": "System.CodeDom/8.0.0",
+      "authors": "Microsoft",
+      "copyright": "\u00a9 Microsoft Corporation. All rights reserved.",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/dotnet/runtime",
+      "commit": "5535e31a712343a63f5d7d796cd874e563e5ac14",
+      "upstreamLicense": null,
+      "files": [
+        {
+          "name": "LICENSE.TXT",
+          "sha256": "d7a68596ab69b06f51ca278a6545148e4269a9381c26d597c13df5d88e08cf5b"
+        },
+        {
+          "name": "THIRD-PARTY-NOTICES.TXT",
+          "sha256": "19c19dcac9f3ee6302cfbc6745bb8e79f08efc4c933eb8dc5509bf14b88347ec"
+        }
+      ]
+    },
+    {
+      "package": "System.ComponentModel.Composition/8.0.0",
+      "authors": "Microsoft",
+      "copyright": "\u00a9 Microsoft Corporation. All rights reserved.",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/dotnet/runtime",
+      "commit": "5535e31a712343a63f5d7d796cd874e563e5ac14",
+      "upstreamLicense": null,
+      "files": [
+        {
+          "name": "LICENSE.TXT",
+          "sha256": "d7a68596ab69b06f51ca278a6545148e4269a9381c26d597c13df5d88e08cf5b"
+        },
+        {
+          "name": "THIRD-PARTY-NOTICES.TXT",
+          "sha256": "19c19dcac9f3ee6302cfbc6745bb8e79f08efc4c933eb8dc5509bf14b88347ec"
+        }
+      ]
+    },
+    {
+      "package": "System.ComponentModel.Composition.Registration/8.0.0",
+      "authors": "Microsoft",
+      "copyright": "\u00a9 Microsoft Corporation. All rights reserved.",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/dotnet/runtime",
+      "commit": "5535e31a712343a63f5d7d796cd874e563e5ac14",
+      "upstreamLicense": null,
+      "files": [
+        {
+          "name": "LICENSE.TXT",
+          "sha256": "d7a68596ab69b06f51ca278a6545148e4269a9381c26d597c13df5d88e08cf5b"
+        },
+        {
+          "name": "THIRD-PARTY-NOTICES.TXT",
+          "sha256": "19c19dcac9f3ee6302cfbc6745bb8e79f08efc4c933eb8dc5509bf14b88347ec"
+        }
+      ]
+    },
+    {
+      "package": "System.Configuration.ConfigurationManager/8.0.1",
+      "authors": "Microsoft",
+      "copyright": "\u00a9 Microsoft Corporation. All rights reserved.",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/dotnet/runtime",
+      "commit": "81cabf2857a01351e5ab578947c7403a5b128ad1",
+      "upstreamLicense": null,
+      "files": [
+        {
+          "name": "LICENSE.TXT",
+          "sha256": "d7a68596ab69b06f51ca278a6545148e4269a9381c26d597c13df5d88e08cf5b"
+        },
+        {
+          "name": "THIRD-PARTY-NOTICES.TXT",
+          "sha256": "b60b2912da28eaa6518593c9e2efb5334ee062d3c42e80d8fdfa806b3dc52977"
+        }
+      ]
+    },
+    {
+      "package": "System.Data.Odbc/8.0.1",
+      "authors": "Microsoft",
+      "copyright": "\u00a9 Microsoft Corporation. All rights reserved.",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/dotnet/runtime",
+      "commit": "81cabf2857a01351e5ab578947c7403a5b128ad1",
+      "upstreamLicense": null,
+      "files": [
+        {
+          "name": "LICENSE.TXT",
+          "sha256": "d7a68596ab69b06f51ca278a6545148e4269a9381c26d597c13df5d88e08cf5b"
+        },
+        {
+          "name": "THIRD-PARTY-NOTICES.TXT",
+          "sha256": "b60b2912da28eaa6518593c9e2efb5334ee062d3c42e80d8fdfa806b3dc52977"
+        }
+      ]
+    },
+    {
+      "package": "System.Data.OleDb/8.0.1",
+      "authors": "Microsoft",
+      "copyright": "\u00a9 Microsoft Corporation. All rights reserved.",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/dotnet/runtime",
+      "commit": "81cabf2857a01351e5ab578947c7403a5b128ad1",
+      "upstreamLicense": null,
+      "files": [
+        {
+          "name": "LICENSE.TXT",
+          "sha256": "d7a68596ab69b06f51ca278a6545148e4269a9381c26d597c13df5d88e08cf5b"
+        },
+        {
+          "name": "THIRD-PARTY-NOTICES.TXT",
+          "sha256": "b60b2912da28eaa6518593c9e2efb5334ee062d3c42e80d8fdfa806b3dc52977"
+        }
+      ]
+    },
+    {
+      "package": "System.Data.SqlClient/4.9.0",
+      "authors": "Microsoft",
+      "copyright": "\u00a9 Microsoft Corporation. All rights reserved.",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/dotnet/maintenance-packages",
+      "commit": "d0c2a5a83211e271826172a6b0510c25a52dbd53",
+      "upstreamLicense": "https://raw.githubusercontent.com/dotnet/maintenance-packages/d0c2a5a83211e271826172a6b0510c25a52dbd53/LICENSE",
+      "files": [
+        {
+          "name": "UPSTREAM-LICENSE.txt",
+          "sha256": "cfc21f5e8bd655ae997eec916138b707b1d290b83272c02a95c9f821b8c87310"
+        }
+      ]
+    },
+    {
+      "package": "System.Diagnostics.EventLog/8.0.2",
+      "authors": "Microsoft",
+      "copyright": "\u00a9 Microsoft Corporation. All rights reserved.",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/dotnet/runtime",
+      "commit": "50c4cb9fc31c47f03eac865d7bc518af173b74b7",
+      "upstreamLicense": null,
+      "files": [
+        {
+          "name": "LICENSE.TXT",
+          "sha256": "d7a68596ab69b06f51ca278a6545148e4269a9381c26d597c13df5d88e08cf5b"
+        },
+        {
+          "name": "THIRD-PARTY-NOTICES.TXT",
+          "sha256": "b60b2912da28eaa6518593c9e2efb5334ee062d3c42e80d8fdfa806b3dc52977"
+        }
+      ]
+    },
+    {
+      "package": "System.Diagnostics.PerformanceCounter/8.0.1",
+      "authors": "Microsoft",
+      "copyright": "\u00a9 Microsoft Corporation. All rights reserved.",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/dotnet/runtime",
+      "commit": "81cabf2857a01351e5ab578947c7403a5b128ad1",
+      "upstreamLicense": null,
+      "files": [
+        {
+          "name": "LICENSE.TXT",
+          "sha256": "d7a68596ab69b06f51ca278a6545148e4269a9381c26d597c13df5d88e08cf5b"
+        },
+        {
+          "name": "THIRD-PARTY-NOTICES.TXT",
+          "sha256": "b60b2912da28eaa6518593c9e2efb5334ee062d3c42e80d8fdfa806b3dc52977"
+        }
+      ]
+    },
+    {
+      "package": "System.DirectoryServices/8.0.0",
+      "authors": "Microsoft",
+      "copyright": "\u00a9 Microsoft Corporation. All rights reserved.",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/dotnet/runtime",
+      "commit": "5535e31a712343a63f5d7d796cd874e563e5ac14",
+      "upstreamLicense": null,
+      "files": [
+        {
+          "name": "LICENSE.TXT",
+          "sha256": "d7a68596ab69b06f51ca278a6545148e4269a9381c26d597c13df5d88e08cf5b"
+        },
+        {
+          "name": "THIRD-PARTY-NOTICES.TXT",
+          "sha256": "19c19dcac9f3ee6302cfbc6745bb8e79f08efc4c933eb8dc5509bf14b88347ec"
+        }
+      ]
+    },
+    {
+      "package": "System.DirectoryServices.AccountManagement/8.0.1",
+      "authors": "Microsoft",
+      "copyright": "\u00a9 Microsoft Corporation. All rights reserved.",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/dotnet/runtime",
+      "commit": "81cabf2857a01351e5ab578947c7403a5b128ad1",
+      "upstreamLicense": null,
+      "files": [
+        {
+          "name": "LICENSE.TXT",
+          "sha256": "d7a68596ab69b06f51ca278a6545148e4269a9381c26d597c13df5d88e08cf5b"
+        },
+        {
+          "name": "THIRD-PARTY-NOTICES.TXT",
+          "sha256": "b60b2912da28eaa6518593c9e2efb5334ee062d3c42e80d8fdfa806b3dc52977"
+        }
+      ]
+    },
+    {
+      "package": "System.DirectoryServices.Protocols/8.0.2",
+      "authors": "Microsoft",
+      "copyright": "\u00a9 Microsoft Corporation. All rights reserved.",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/dotnet/runtime",
+      "commit": "77545d6fd5ca79bc08198fd6d8037c14843f14ad",
+      "upstreamLicense": null,
+      "files": [
+        {
+          "name": "LICENSE.TXT",
+          "sha256": "d7a68596ab69b06f51ca278a6545148e4269a9381c26d597c13df5d88e08cf5b"
+        },
+        {
+          "name": "THIRD-PARTY-NOTICES.TXT",
+          "sha256": "b60b2912da28eaa6518593c9e2efb5334ee062d3c42e80d8fdfa806b3dc52977"
+        }
+      ]
+    },
+    {
+      "package": "System.Drawing.Common/8.0.30",
+      "authors": "Microsoft",
+      "copyright": "\u00a9 Microsoft Corporation. All rights reserved.",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/dotnet/winforms",
+      "commit": "3bde17662ffbf8c378d06d58f99da47eb047eb23",
+      "upstreamLicense": null,
+      "files": [
+        {
+          "name": "LICENSE.TXT",
+          "sha256": "a89886665765362eb77e0f8e26602c924520041d1711b2eedc136434fe4d01ab"
+        },
+        {
+          "name": "THIRD-PARTY-NOTICES.TXT",
+          "sha256": "093e2589a27ed137e519b9856e425efa7982221a7b3d9e7cea3b5153f711905e"
+        }
+      ]
+    },
+    {
+      "package": "System.IO.Packaging/8.0.1",
+      "authors": "Microsoft",
+      "copyright": "\u00a9 Microsoft Corporation. All rights reserved.",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/dotnet/runtime",
+      "commit": "81cabf2857a01351e5ab578947c7403a5b128ad1",
+      "upstreamLicense": null,
+      "files": [
+        {
+          "name": "LICENSE.TXT",
+          "sha256": "d7a68596ab69b06f51ca278a6545148e4269a9381c26d597c13df5d88e08cf5b"
+        },
+        {
+          "name": "THIRD-PARTY-NOTICES.TXT",
+          "sha256": "b60b2912da28eaa6518593c9e2efb5334ee062d3c42e80d8fdfa806b3dc52977"
+        }
+      ]
+    },
+    {
+      "package": "System.IO.Ports/8.0.0",
+      "authors": "Microsoft",
+      "copyright": "\u00a9 Microsoft Corporation. All rights reserved.",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/dotnet/runtime",
+      "commit": "5535e31a712343a63f5d7d796cd874e563e5ac14",
+      "upstreamLicense": null,
+      "files": [
+        {
+          "name": "LICENSE.TXT",
+          "sha256": "d7a68596ab69b06f51ca278a6545148e4269a9381c26d597c13df5d88e08cf5b"
+        },
+        {
+          "name": "THIRD-PARTY-NOTICES.TXT",
+          "sha256": "19c19dcac9f3ee6302cfbc6745bb8e79f08efc4c933eb8dc5509bf14b88347ec"
+        }
+      ]
+    },
+    {
+      "package": "System.Management/8.0.0",
+      "authors": "Microsoft",
+      "copyright": "\u00a9 Microsoft Corporation. All rights reserved.",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/dotnet/runtime",
+      "commit": "5535e31a712343a63f5d7d796cd874e563e5ac14",
+      "upstreamLicense": null,
+      "files": [
+        {
+          "name": "LICENSE.TXT",
+          "sha256": "d7a68596ab69b06f51ca278a6545148e4269a9381c26d597c13df5d88e08cf5b"
+        },
+        {
+          "name": "THIRD-PARTY-NOTICES.TXT",
+          "sha256": "19c19dcac9f3ee6302cfbc6745bb8e79f08efc4c933eb8dc5509bf14b88347ec"
+        }
+      ]
+    },
+    {
+      "package": "System.Numerics.Vectors/4.5.0",
+      "authors": "Microsoft",
+      "copyright": "\u00a9 Microsoft Corporation.  All rights reserved.",
+      "licenseExpression": null,
+      "repository": "",
+      "commit": "",
+      "upstreamLicense": null,
+      "files": [
+        {
+          "name": "LICENSE.TXT",
+          "sha256": "d7a68596ab69b06f51ca278a6545148e4269a9381c26d597c13df5d88e08cf5b"
+        },
+        {
+          "name": "THIRD-PARTY-NOTICES.TXT",
+          "sha256": "7864a01e2fdef7e8fdf81b906efb1466f083206affea7ba7e6dadea429754765"
+        }
+      ]
+    },
+    {
+      "package": "System.Private.ServiceModel/4.10.3",
+      "authors": "Microsoft",
+      "copyright": "\u00a9 Microsoft Corporation. All rights reserved.",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/dotnet/wcf",
+      "commit": "6c05fa33450ee3960f0763948e91327f049b302b",
+      "upstreamLicense": null,
+      "files": [
+        {
+          "name": "LICENSE.TXT",
+          "sha256": "d7a68596ab69b06f51ca278a6545148e4269a9381c26d597c13df5d88e08cf5b"
+        },
+        {
+          "name": "THIRD-PARTY-NOTICES.TXT",
+          "sha256": "208d31ba373d2017a0bad0a5593f3050952abd3a1f6a29df85c33494c48d2885"
+        }
+      ]
+    },
+    {
+      "package": "System.Reflection.Context/8.0.0",
+      "authors": "Microsoft",
+      "copyright": "\u00a9 Microsoft Corporation. All rights reserved.",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/dotnet/runtime",
+      "commit": "5535e31a712343a63f5d7d796cd874e563e5ac14",
+      "upstreamLicense": null,
+      "files": [
+        {
+          "name": "LICENSE.TXT",
+          "sha256": "d7a68596ab69b06f51ca278a6545148e4269a9381c26d597c13df5d88e08cf5b"
+        },
+        {
+          "name": "THIRD-PARTY-NOTICES.TXT",
+          "sha256": "19c19dcac9f3ee6302cfbc6745bb8e79f08efc4c933eb8dc5509bf14b88347ec"
+        }
+      ]
+    },
+    {
+      "package": "System.Reflection.DispatchProxy/4.7.1",
+      "authors": "Microsoft",
+      "copyright": "\u00a9 Microsoft Corporation. All rights reserved.",
+      "licenseExpression": "MIT",
+      "repository": "",
+      "commit": "",
+      "upstreamLicense": null,
+      "files": [
+        {
+          "name": "LICENSE.TXT",
+          "sha256": "d7a68596ab69b06f51ca278a6545148e4269a9381c26d597c13df5d88e08cf5b"
+        },
+        {
+          "name": "THIRD-PARTY-NOTICES.TXT",
+          "sha256": "388c07f579998286e5df706a2e68bf6e01100187ccb0ff0310e26c3383f7b2b2"
+        }
+      ]
+    },
+    {
+      "package": "System.Runtime.Caching/8.0.1",
+      "authors": "Microsoft",
+      "copyright": "\u00a9 Microsoft Corporation. All rights reserved.",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/dotnet/runtime",
+      "commit": "81cabf2857a01351e5ab578947c7403a5b128ad1",
+      "upstreamLicense": null,
+      "files": [
+        {
+          "name": "LICENSE.TXT",
+          "sha256": "d7a68596ab69b06f51ca278a6545148e4269a9381c26d597c13df5d88e08cf5b"
+        },
+        {
+          "name": "THIRD-PARTY-NOTICES.TXT",
+          "sha256": "b60b2912da28eaa6518593c9e2efb5334ee062d3c42e80d8fdfa806b3dc52977"
+        }
+      ]
+    },
+    {
+      "package": "System.Security.Cryptography.Pkcs/8.0.1",
+      "authors": "Microsoft",
+      "copyright": "\u00a9 Microsoft Corporation. All rights reserved.",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/dotnet/runtime",
+      "commit": "81cabf2857a01351e5ab578947c7403a5b128ad1",
+      "upstreamLicense": null,
+      "files": [
+        {
+          "name": "LICENSE.TXT",
+          "sha256": "d7a68596ab69b06f51ca278a6545148e4269a9381c26d597c13df5d88e08cf5b"
+        },
+        {
+          "name": "THIRD-PARTY-NOTICES.TXT",
+          "sha256": "b60b2912da28eaa6518593c9e2efb5334ee062d3c42e80d8fdfa806b3dc52977"
+        }
+      ]
+    },
+    {
+      "package": "System.Security.Cryptography.ProtectedData/8.0.0",
+      "authors": "Microsoft",
+      "copyright": "\u00a9 Microsoft Corporation. All rights reserved.",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/dotnet/runtime",
+      "commit": "5535e31a712343a63f5d7d796cd874e563e5ac14",
+      "upstreamLicense": null,
+      "files": [
+        {
+          "name": "LICENSE.TXT",
+          "sha256": "d7a68596ab69b06f51ca278a6545148e4269a9381c26d597c13df5d88e08cf5b"
+        },
+        {
+          "name": "THIRD-PARTY-NOTICES.TXT",
+          "sha256": "19c19dcac9f3ee6302cfbc6745bb8e79f08efc4c933eb8dc5509bf14b88347ec"
+        }
+      ]
+    },
+    {
+      "package": "System.Security.Cryptography.Xml/8.0.4",
+      "authors": "Microsoft",
+      "copyright": "\u00a9 Microsoft Corporation. All rights reserved.",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/dotnet/runtime",
+      "commit": "18fd75c847399745c43b5970fec840ba71064e80",
+      "upstreamLicense": null,
+      "files": [
+        {
+          "name": "LICENSE.TXT",
+          "sha256": "d7a68596ab69b06f51ca278a6545148e4269a9381c26d597c13df5d88e08cf5b"
+        },
+        {
+          "name": "THIRD-PARTY-NOTICES.TXT",
+          "sha256": "b60b2912da28eaa6518593c9e2efb5334ee062d3c42e80d8fdfa806b3dc52977"
+        }
+      ]
+    },
+    {
+      "package": "System.Security.Permissions/8.0.0",
+      "authors": "Microsoft",
+      "copyright": "\u00a9 Microsoft Corporation. All rights reserved.",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/dotnet/runtime",
+      "commit": "5535e31a712343a63f5d7d796cd874e563e5ac14",
+      "upstreamLicense": null,
+      "files": [
+        {
+          "name": "LICENSE.TXT",
+          "sha256": "d7a68596ab69b06f51ca278a6545148e4269a9381c26d597c13df5d88e08cf5b"
+        },
+        {
+          "name": "THIRD-PARTY-NOTICES.TXT",
+          "sha256": "19c19dcac9f3ee6302cfbc6745bb8e79f08efc4c933eb8dc5509bf14b88347ec"
+        }
+      ]
+    },
+    {
+      "package": "System.Security.Principal.Windows/5.0.0",
+      "authors": "Microsoft",
+      "copyright": "\u00a9 Microsoft Corporation. All rights reserved.",
+      "licenseExpression": "MIT",
+      "repository": "git://github.com/dotnet/runtime",
+      "commit": "cf258a14b70ad9069470a108f13765e0e5988f51",
+      "upstreamLicense": null,
+      "files": [
+        {
+          "name": "LICENSE.TXT",
+          "sha256": "d7a68596ab69b06f51ca278a6545148e4269a9381c26d597c13df5d88e08cf5b"
+        },
+        {
+          "name": "THIRD-PARTY-NOTICES.TXT",
+          "sha256": "78e22d4d24a710d2a09426c09060f3448204778ed506b1da55447a6089b54fae"
+        }
+      ]
+    },
+    {
+      "package": "System.ServiceModel.Duplex/4.10.3",
+      "authors": "Microsoft",
+      "copyright": "\u00a9 Microsoft Corporation. All rights reserved.",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/dotnet/wcf",
+      "commit": "6c05fa33450ee3960f0763948e91327f049b302b",
+      "upstreamLicense": null,
+      "files": [
+        {
+          "name": "LICENSE.TXT",
+          "sha256": "d7a68596ab69b06f51ca278a6545148e4269a9381c26d597c13df5d88e08cf5b"
+        },
+        {
+          "name": "THIRD-PARTY-NOTICES.TXT",
+          "sha256": "208d31ba373d2017a0bad0a5593f3050952abd3a1f6a29df85c33494c48d2885"
+        }
+      ]
+    },
+    {
+      "package": "System.ServiceModel.Http/4.10.3",
+      "authors": "Microsoft",
+      "copyright": "\u00a9 Microsoft Corporation. All rights reserved.",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/dotnet/wcf",
+      "commit": "6c05fa33450ee3960f0763948e91327f049b302b",
+      "upstreamLicense": null,
+      "files": [
+        {
+          "name": "LICENSE.TXT",
+          "sha256": "d7a68596ab69b06f51ca278a6545148e4269a9381c26d597c13df5d88e08cf5b"
+        },
+        {
+          "name": "THIRD-PARTY-NOTICES.TXT",
+          "sha256": "208d31ba373d2017a0bad0a5593f3050952abd3a1f6a29df85c33494c48d2885"
+        }
+      ]
+    },
+    {
+      "package": "System.ServiceModel.NetTcp/4.10.3",
+      "authors": "Microsoft",
+      "copyright": "\u00a9 Microsoft Corporation. All rights reserved.",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/dotnet/wcf",
+      "commit": "6c05fa33450ee3960f0763948e91327f049b302b",
+      "upstreamLicense": null,
+      "files": [
+        {
+          "name": "LICENSE.TXT",
+          "sha256": "d7a68596ab69b06f51ca278a6545148e4269a9381c26d597c13df5d88e08cf5b"
+        },
+        {
+          "name": "THIRD-PARTY-NOTICES.TXT",
+          "sha256": "208d31ba373d2017a0bad0a5593f3050952abd3a1f6a29df85c33494c48d2885"
+        }
+      ]
+    },
+    {
+      "package": "System.ServiceModel.Primitives/4.10.3",
+      "authors": "Microsoft",
+      "copyright": "\u00a9 Microsoft Corporation. All rights reserved.",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/dotnet/wcf",
+      "commit": "6c05fa33450ee3960f0763948e91327f049b302b",
+      "upstreamLicense": null,
+      "files": [
+        {
+          "name": "LICENSE.TXT",
+          "sha256": "d7a68596ab69b06f51ca278a6545148e4269a9381c26d597c13df5d88e08cf5b"
+        },
+        {
+          "name": "THIRD-PARTY-NOTICES.TXT",
+          "sha256": "208d31ba373d2017a0bad0a5593f3050952abd3a1f6a29df85c33494c48d2885"
+        }
+      ]
+    },
+    {
+      "package": "System.ServiceModel.Security/4.10.3",
+      "authors": "Microsoft",
+      "copyright": "\u00a9 Microsoft Corporation. All rights reserved.",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/dotnet/wcf",
+      "commit": "6c05fa33450ee3960f0763948e91327f049b302b",
+      "upstreamLicense": null,
+      "files": [
+        {
+          "name": "LICENSE.TXT",
+          "sha256": "d7a68596ab69b06f51ca278a6545148e4269a9381c26d597c13df5d88e08cf5b"
+        },
+        {
+          "name": "THIRD-PARTY-NOTICES.TXT",
+          "sha256": "208d31ba373d2017a0bad0a5593f3050952abd3a1f6a29df85c33494c48d2885"
+        }
+      ]
+    },
+    {
+      "package": "System.ServiceModel.Syndication/8.0.0",
+      "authors": "Microsoft",
+      "copyright": "\u00a9 Microsoft Corporation. All rights reserved.",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/dotnet/runtime",
+      "commit": "5535e31a712343a63f5d7d796cd874e563e5ac14",
+      "upstreamLicense": null,
+      "files": [
+        {
+          "name": "LICENSE.TXT",
+          "sha256": "d7a68596ab69b06f51ca278a6545148e4269a9381c26d597c13df5d88e08cf5b"
+        },
+        {
+          "name": "THIRD-PARTY-NOTICES.TXT",
+          "sha256": "19c19dcac9f3ee6302cfbc6745bb8e79f08efc4c933eb8dc5509bf14b88347ec"
+        }
+      ]
+    },
+    {
+      "package": "System.ServiceProcess.ServiceController/8.0.1",
+      "authors": "Microsoft",
+      "copyright": "\u00a9 Microsoft Corporation. All rights reserved.",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/dotnet/runtime",
+      "commit": "81cabf2857a01351e5ab578947c7403a5b128ad1",
+      "upstreamLicense": null,
+      "files": [
+        {
+          "name": "LICENSE.TXT",
+          "sha256": "d7a68596ab69b06f51ca278a6545148e4269a9381c26d597c13df5d88e08cf5b"
+        },
+        {
+          "name": "THIRD-PARTY-NOTICES.TXT",
+          "sha256": "b60b2912da28eaa6518593c9e2efb5334ee062d3c42e80d8fdfa806b3dc52977"
+        }
+      ]
+    },
+    {
+      "package": "System.Speech/8.0.0",
+      "authors": "Microsoft",
+      "copyright": "\u00a9 Microsoft Corporation. All rights reserved.",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/dotnet/runtime",
+      "commit": "5535e31a712343a63f5d7d796cd874e563e5ac14",
+      "upstreamLicense": null,
+      "files": [
+        {
+          "name": "LICENSE.TXT",
+          "sha256": "d7a68596ab69b06f51ca278a6545148e4269a9381c26d597c13df5d88e08cf5b"
+        },
+        {
+          "name": "THIRD-PARTY-NOTICES.TXT",
+          "sha256": "19c19dcac9f3ee6302cfbc6745bb8e79f08efc4c933eb8dc5509bf14b88347ec"
+        }
+      ]
+    },
+    {
+      "package": "System.Text.Encoding.CodePages/8.0.0",
+      "authors": "Microsoft",
+      "copyright": "\u00a9 Microsoft Corporation. All rights reserved.",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/dotnet/runtime",
+      "commit": "5535e31a712343a63f5d7d796cd874e563e5ac14",
+      "upstreamLicense": null,
+      "files": [
+        {
+          "name": "LICENSE.TXT",
+          "sha256": "d7a68596ab69b06f51ca278a6545148e4269a9381c26d597c13df5d88e08cf5b"
+        },
+        {
+          "name": "THIRD-PARTY-NOTICES.TXT",
+          "sha256": "19c19dcac9f3ee6302cfbc6745bb8e79f08efc4c933eb8dc5509bf14b88347ec"
+        }
+      ]
+    },
+    {
+      "package": "System.Threading.AccessControl/8.0.0",
+      "authors": "Microsoft",
+      "copyright": "\u00a9 Microsoft Corporation. All rights reserved.",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/dotnet/runtime",
+      "commit": "5535e31a712343a63f5d7d796cd874e563e5ac14",
+      "upstreamLicense": null,
+      "files": [
+        {
+          "name": "LICENSE.TXT",
+          "sha256": "d7a68596ab69b06f51ca278a6545148e4269a9381c26d597c13df5d88e08cf5b"
+        },
+        {
+          "name": "THIRD-PARTY-NOTICES.TXT",
+          "sha256": "19c19dcac9f3ee6302cfbc6745bb8e79f08efc4c933eb8dc5509bf14b88347ec"
+        }
+      ]
+    },
+    {
+      "package": "System.Web.Services.Description/4.10.3",
+      "authors": "Microsoft",
+      "copyright": "\u00a9 Microsoft Corporation. All rights reserved.",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/dotnet/wcf",
+      "commit": "6c05fa33450ee3960f0763948e91327f049b302b",
+      "upstreamLicense": null,
+      "files": [
+        {
+          "name": "LICENSE.TXT",
+          "sha256": "d7a68596ab69b06f51ca278a6545148e4269a9381c26d597c13df5d88e08cf5b"
+        },
+        {
+          "name": "THIRD-PARTY-NOTICES.TXT",
+          "sha256": "208d31ba373d2017a0bad0a5593f3050952abd3a1f6a29df85c33494c48d2885"
+        }
+      ]
+    },
+    {
+      "package": "System.Windows.Extensions/8.0.0",
+      "authors": "Microsoft",
+      "copyright": "\u00a9 Microsoft Corporation. All rights reserved.",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/dotnet/runtime",
+      "commit": "5535e31a712343a63f5d7d796cd874e563e5ac14",
+      "upstreamLicense": null,
+      "files": [
+        {
+          "name": "LICENSE.TXT",
+          "sha256": "d7a68596ab69b06f51ca278a6545148e4269a9381c26d597c13df5d88e08cf5b"
+        },
+        {
+          "name": "THIRD-PARTY-NOTICES.TXT",
+          "sha256": "19c19dcac9f3ee6302cfbc6745bb8e79f08efc4c933eb8dc5509bf14b88347ec"
+        }
+      ]
+    }
+  ]
+}

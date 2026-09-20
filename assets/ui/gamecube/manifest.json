@@ -1,0 +1,129 @@
+{
+  "canvas": [
+    128,
+    128
+  ],
+  "ui_draw_size": [
+    32,
+    32
+  ],
+  "transparent": true,
+  "do_not_crop": true,
+  "font_independent": true,
+  "reference": "https://www.nintendo.co.jp/ngc/control/control.jpg",
+  "palette_note": "Flat UI interpretations of observed hardware colors, not official colorimetric specifications.",
+  "palette": {
+    "a": "#32B895",
+    "b": "#DF4049",
+    "gray": "#BBC0CA",
+    "z": "#8175C8",
+    "outline": "#172132",
+    "edge": "#F0EAD6"
+  },
+  "glyphs": [
+    {
+      "name": "a",
+      "label": "A",
+      "color": "#32B895",
+      "center": [
+        64,
+        64
+      ],
+      "letter_scale": 1.55,
+      "description": "Large green round face button",
+      "svg": "a.svg",
+      "png": "a.png"
+    },
+    {
+      "name": "b",
+      "label": "B",
+      "color": "#DF4049",
+      "center": [
+        64,
+        64
+      ],
+      "letter_scale": 1.25,
+      "description": "Smaller red round face button; diameter 71 percent of A",
+      "svg": "b.svg",
+      "png": "b.png"
+    },
+    {
+      "name": "x",
+      "label": "X",
+      "color": "#BBC0CA",
+      "center": [
+        73,
+        64
+      ],
+      "letter_scale": 1.28,
+      "description": "Tall gray X; inner edge faces left toward A, top leans left",
+      "svg": "x.svg",
+      "png": "x.png"
+    },
+    {
+      "name": "y",
+      "label": "Y",
+      "color": "#BBC0CA",
+      "center": [
+        65,
+        49
+      ],
+      "letter_scale": 1.13,
+      "description": "Wide gray Y above A; outer edge rises toward the right",
+      "svg": "y.svg",
+      "png": "y.png"
+    },
+    {
+      "name": "z",
+      "label": "Z",
+      "color": "#8175C8",
+      "center": [
+        64,
+        60
+      ],
+      "letter_scale": 1.28,
+      "description": "Purple narrow shoulder button",
+      "svg": "z.svg",
+      "png": "z.png"
+    },
+    {
+      "name": "l",
+      "label": "L",
+      "color": "#BBC0CA",
+      "center": [
+        62,
+        58
+      ],
+      "letter_scale": 1.38,
+      "description": "Gray left analog trigger, broad curved top and tapered base",
+      "svg": "l.svg",
+      "png": "l.png"
+    },
+    {
+      "name": "r",
+      "label": "R",
+      "color": "#BBC0CA",
+      "center": [
+        66,
+        58
+      ],
+      "letter_scale": 1.38,
+      "description": "Gray right analog trigger, mirrored left trigger outline",
+      "svg": "r.svg",
+      "png": "r.png"
+    },
+    {
+      "name": "start-pause",
+      "label": "",
+      "color": "#BBC0CA",
+      "center": [
+        64,
+        64
+      ],
+      "letter_scale": 1.0,
+      "description": "Small blank gray Start/Pause button; use an adjacent text label",
+      "svg": "start-pause.svg",
+      "png": "start-pause.png"
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "package": "System.ComponentModel.Annotations",
+  "version": "5.0.0",
+  "source": "https://www.nuget.org/packages/System.ComponentModel.Annotations/5.0.0",
+  "notices": [
+    "LICENSE.TXT",
+    "THIRD-PARTY-NOTICES.TXT"
+  ]
+}

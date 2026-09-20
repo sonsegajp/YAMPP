@@ -1,0 +1,10 @@
+{
+  "package": "bodong.PropertyModels",
+  "version": "11.1.1.1",
+  "source": "https://www.nuget.org/packages/bodong.PropertyModels/11.1.1.1",
+  "notices": [
+    "LICENSE.txt"
+  ],
+  "licenseSource": "https://raw.githubusercontent.com/bodong1987/Avalonia.PropertyGrid/de6f5d66647f8094ef97d5b592c8d855d65e1e39/LICENSE",
+  "licenseSha256": "f9652be457998134acf35f6d188e533116222b0c0c2d016b9393b963aa26e923"
+}

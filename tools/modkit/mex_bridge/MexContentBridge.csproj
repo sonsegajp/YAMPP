@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net8.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable></PropertyGroup>
+  <ItemGroup><ProjectReference Include="../../../upstream/MexManager/mexLib/mexLib.csproj" /></ItemGroup>
+  <ItemGroup><Reference Include="HSDRaw"><HintPath>../../../upstream/MexManager/MexManager.Desktop/HSDRaw.dll</HintPath></Reference></ItemGroup>
+  <ItemGroup><PackageReference Include="SixLabors.ImageSharp" Version="3.1.11" /></ItemGroup>
+</Project>

@@ -1,0 +1,8 @@
+{
+  "package": "SixLabors.ImageSharp.Drawing",
+  "version": "2.1.4",
+  "source": "https://www.nuget.org/packages/SixLabors.ImageSharp.Drawing/2.1.4",
+  "notices": [
+    "LICENSE"
+  ]
+}

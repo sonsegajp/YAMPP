@@ -1,0 +1,33 @@
+{
+  "canvas": [
+    128,
+    96
+  ],
+  "pixel_format": "GX_TF_RGBA8",
+  "reference": "MnMaAll.usd original menu preview illustrations: flat grey fill, pale contour, front-facing symbols.",
+  "screen_height": 108,
+  "icons": {
+    "narrow": {
+      "source": "monitor-narrow-native.svg",
+      "png": "monitor-narrow-native.png",
+      "screen_opening": [
+        56,
+        25,
+        144,
+        108
+      ],
+      "ratio": 1.3333333333333333
+    },
+    "wide": {
+      "source": "monitor-wide-native.svg",
+      "png": "monitor-wide-native.png",
+      "screen_opening": [
+        32,
+        25,
+        192,
+        108
+      ],
+      "ratio": 1.7777777777777777
+    }
+  }
+}

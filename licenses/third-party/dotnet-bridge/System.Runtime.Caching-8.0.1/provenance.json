@@ -1,0 +1,19 @@
+{
+  "package": "System.Runtime.Caching/8.0.1",
+  "authors": "Microsoft",
+  "copyright": "\u00a9 Microsoft Corporation. All rights reserved.",
+  "licenseExpression": "MIT",
+  "repository": "https://github.com/dotnet/runtime",
+  "commit": "81cabf2857a01351e5ab578947c7403a5b128ad1",
+  "upstreamLicense": null,
+  "files": [
+    {
+      "name": "LICENSE.TXT",
+      "sha256": "d7a68596ab69b06f51ca278a6545148e4269a9381c26d597c13df5d88e08cf5b"
+    },
+    {
+      "name": "THIRD-PARTY-NOTICES.TXT",
+      "sha256": "b60b2912da28eaa6518593c9e2efb5334ee062d3c42e80d8fdfa806b3dc52977"
+    }
+  ]
+}

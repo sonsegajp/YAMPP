@@ -1,0 +1,15 @@
+{
+  "package": "Microsoft.Windows.Compatibility/8.0.30",
+  "authors": "Microsoft",
+  "copyright": "\u00a9 Microsoft Corporation. All rights reserved.",
+  "licenseExpression": "MIT",
+  "repository": "https://github.com/dotnet/windowsdesktop",
+  "commit": "69f0fdb740773a6f766d6ba7e692f5653062c095",
+  "upstreamLicense": "https://raw.githubusercontent.com/dotnet/windowsdesktop/69f0fdb740773a6f766d6ba7e692f5653062c095/LICENSE",
+  "files": [
+    {
+      "name": "UPSTREAM-LICENSE.txt",
+      "sha256": "ae48df11a335dc1a615f4f938b69cba73bcf4485c4f97af49b38efb0f216353b"
+    }
+  ]
+}

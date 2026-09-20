@@ -1,0 +1,19 @@
+{
+  "package": "runtime.native.System.Data.SqlClient.sni/4.4.0",
+  "authors": "Microsoft",
+  "copyright": "\u00a9 Microsoft Corporation.  All rights reserved.",
+  "licenseExpression": null,
+  "repository": "",
+  "commit": "",
+  "upstreamLicense": null,
+  "files": [
+    {
+      "name": "LICENSE.TXT",
+      "sha256": "d7a68596ab69b06f51ca278a6545148e4269a9381c26d597c13df5d88e08cf5b"
+    },
+    {
+      "name": "THIRD-PARTY-NOTICES.TXT",
+      "sha256": "0ef4dce1f4e8965f19a3b8b2f984f337d5c35e5aaf7f8a36b95aec66c301963a"
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "package": "System.ServiceModel.Security/4.10.3",
+  "authors": "Microsoft",
+  "copyright": "\u00a9 Microsoft Corporation. All rights reserved.",
+  "licenseExpression": "MIT",
+  "repository": "https://github.com/dotnet/wcf",
+  "commit": "6c05fa33450ee3960f0763948e91327f049b302b",
+  "upstreamLicense": null,
+  "files": [
+    {
+      "name": "LICENSE.TXT",
+      "sha256": "d7a68596ab69b06f51ca278a6545148e4269a9381c26d597c13df5d88e08cf5b"
+    },
+    {
+      "name": "THIRD-PARTY-NOTICES.TXT",
+      "sha256": "208d31ba373d2017a0bad0a5593f3050952abd3a1f6a29df85c33494c48d2885"
+    }
+  ]
+}

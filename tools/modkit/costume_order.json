@@ -1,0 +1,201 @@
+{
+  "Ca": [
+    "PlCaNr.dat",
+    "PlCaGy.dat",
+    "PlCaRe.dat",
+    "PlCaWh.dat",
+    "PlCaGr.dat",
+    "PlCaBu.dat"
+  ],
+  "Cl": [
+    "PlClNr.dat",
+    "PlClRe.dat",
+    "PlClBu.dat",
+    "PlClWh.dat",
+    "PlClBk.dat"
+  ],
+  "Ch": [
+    "PlChNr.dat"
+  ],
+  "Dk": [
+    "PlDkNr.dat",
+    "PlDkBk.dat",
+    "PlDkRe.dat",
+    "PlDkBu.dat",
+    "PlDkGr.dat"
+  ],
+  "Dr": [
+    "PlDrNr.dat",
+    "PlDrRe.dat",
+    "PlDrBu.dat",
+    "PlDrGr.dat",
+    "PlDrBk.dat"
+  ],
+  "Fe": [
+    "PlFeNr.dat",
+    "PlFeRe.dat",
+    "PlFeBu.dat",
+    "PlFeGr.dat",
+    "PlFeYe.dat"
+  ],
+  "Fc": [
+    "PlFcNr.dat",
+    "PlFcRe.dat",
+    "PlFcBu.dat",
+    "PlFcGr.dat"
+  ],
+  "Fx": [
+    "PlFxNr.dat",
+    "PlFxOr.dat",
+    "PlFxLa.dat",
+    "PlFxGr.dat"
+  ],
+  "Gw": [
+    "PlGwNr.dat",
+    "PlGwNr.dat",
+    "PlGwNr.dat",
+    "PlGwNr.dat"
+  ],
+  "Gn": [
+    "PlGnNr.dat",
+    "PlGnRe.dat",
+    "PlGnBu.dat",
+    "PlGnGr.dat",
+    "PlGnLa.dat"
+  ],
+  "Gk": [
+    "PlGkNr.dat"
+  ],
+  "Kb": [
+    "PlKbNr.dat",
+    "PlKbYe.dat",
+    "PlKbBu.dat",
+    "PlKbRe.dat",
+    "PlKbGr.dat",
+    "PlKbWh.dat"
+  ],
+  "Kp": [
+    "PlKpNr.dat",
+    "PlKpRe.dat",
+    "PlKpBu.dat",
+    "PlKpBk.dat"
+  ],
+  "Lk": [
+    "PlLkNr.dat",
+    "PlLkRe.dat",
+    "PlLkBu.dat",
+    "PlLkBk.dat",
+    "PlLkWh.dat"
+  ],
+  "Lg": [
+    "PlLgNr.dat",
+    "PlLgWh.dat",
+    "PlLgAq.dat",
+    "PlLgPi.dat"
+  ],
+  "Mr": [
+    "PlMrNr.dat",
+    "PlMrYe.dat",
+    "PlMrBk.dat",
+    "PlMrBu.dat",
+    "PlMrGr.dat"
+  ],
+  "Ms": [
+    "PlMsNr.dat",
+    "PlMsRe.dat",
+    "PlMsGr.dat",
+    "PlMsBk.dat",
+    "PlMsWh.dat"
+  ],
+  "Mh": [
+    "PlMhNr.dat"
+  ],
+  "Mt": [
+    "PlMtNr.dat",
+    "PlMtRe.dat",
+    "PlMtBu.dat",
+    "PlMtGr.dat"
+  ],
+  "Nn": [
+    "PlNnNr.dat",
+    "PlNnYe.dat",
+    "PlNnAq.dat",
+    "PlNnWh.dat"
+  ],
+  "Ns": [
+    "PlNsNr.dat",
+    "PlNsYe.dat",
+    "PlNsBu.dat",
+    "PlNsGr.dat"
+  ],
+  "Pe": [
+    "PlPeNr.dat",
+    "PlPeYe.dat",
+    "PlPeWh.dat",
+    "PlPeBu.dat",
+    "PlPeGr.dat"
+  ],
+  "Pc": [
+    "PlPcNr.dat",
+    "PlPcRe.dat",
+    "PlPcBu.dat",
+    "PlPcGr.dat"
+  ],
+  "Pk": [
+    "PlPkNr.dat",
+    "PlPkRe.dat",
+    "PlPkBu.dat",
+    "PlPkGr.dat"
+  ],
+  "Pp": [
+    "PlPpNr.dat",
+    "PlPpGr.dat",
+    "PlPpOr.dat",
+    "PlPpRe.dat"
+  ],
+  "Pr": [
+    "PlPrNr.dat",
+    "PlPrRe.dat",
+    "PlPrBu.dat",
+    "PlPrGr.dat",
+    "PlPrYe.dat"
+  ],
+  "Ss": [
+    "PlSsNr.dat",
+    "PlSsPi.dat",
+    "PlSsBk.dat",
+    "PlSsGr.dat",
+    "PlSsLa.dat"
+  ],
+  "Sb": [
+    "PlSbNr.dat"
+  ],
+  "Sk": [
+    "PlSkNr.dat",
+    "PlSkRe.dat",
+    "PlSkBu.dat",
+    "PlSkGr.dat",
+    "PlSkWh.dat"
+  ],
+  "Ys": [
+    "PlYsNr.dat",
+    "PlYsRe.dat",
+    "PlYsBu.dat",
+    "PlYsYe.dat",
+    "PlYsPi.dat",
+    "PlYsAq.dat"
+  ],
+  "Bo": [
+    "PlBoNr.dat"
+  ],
+  "Gl": [
+    "PlGlNr.dat"
+  ],
+  "Zd": [
+    "PlZdNr.dat",
+    "PlZdRe.dat",
+    "PlZdBu.dat",
+    "PlZdGr.dat",
+    "PlZdWh.dat"
+  ]
+}

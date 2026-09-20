@@ -1,0 +1,3 @@
+Built-in imagegen, 2026-09-19. Generated source: controller-hover-generated.png.
+Prompt: Front orthographic GameCube controller pictogram explicitly matching Melee Options technical illustrations. Pale gray-white outlines, dark desaturated blue-gray fill, crisp flat shapes, no cable, lettering or logo, transparent alpha. Accurate GameCube silhouette, stick gates and control layout. No glow or photographic lighting.
+The native I4 packing script performs resolution/format conversion only. Original Melee supplies the panel, geometry, animation and menu camera at runtime from the user disc.

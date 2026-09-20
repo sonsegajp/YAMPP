@@ -1,0 +1,14 @@
+{
+  "melee": {
+    "url": "https://github.com/doldecomp/melee.git",
+    "commit": "05a1394faea2aac458e4bdd030621d8a5631ae62"
+  },
+  "aurora": {
+    "url": "https://github.com/encounter/aurora.git",
+    "commit": "749d6ee7a22bdfab78c8ece9047bca5d79aa72ca"
+  },
+  "HSDLib": {
+    "url": "https://github.com/Ploaj/HSDLib.git",
+    "commit": "85567e40797de3c820a55476eca54c704921a848"
+  }
+}

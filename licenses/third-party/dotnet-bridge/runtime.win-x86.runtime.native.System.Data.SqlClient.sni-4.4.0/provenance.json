@@ -1,0 +1,19 @@
+{
+  "package": "runtime.win-x86.runtime.native.System.Data.SqlClient.sni/4.4.0",
+  "authors": "Microsoft",
+  "copyright": "\u00a9 Microsoft Corporation.  All rights reserved.",
+  "licenseExpression": null,
+  "repository": "",
+  "commit": "",
+  "upstreamLicense": null,
+  "files": [
+    {
+      "name": "dotnet_library_license.txt",
+      "sha256": "f1db688d8481c91a452fabcea5060a23da9ea5088329b58c478a040e2e426297"
+    },
+    {
+      "name": "ThirdPartyNotices.txt",
+      "sha256": "0684b2349427ee28e392ae8914645832e59731dba8a38a984f72b3fb8769c76b"
+    }
+  ]
+}

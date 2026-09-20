@@ -1,0 +1,2 @@
+<?xml version="1.0" encoding="utf-8"?>
+<melee-runtime-profile schema="1" executable="build/native-game/melee-native-polish.exe" renderer="build/pc/bin/melee_aurora_polish.dll" />

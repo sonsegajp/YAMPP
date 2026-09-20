@@ -1,0 +1,16 @@
+{
+  "upstream": "https://github.com/Ploaj/HSDLib",
+  "commit": "85567e40797de3c820a55476eca54c704921a848",
+  "license": "MIT",
+  "normalization": "CRLF to LF only",
+  "files": {
+    "HSDRaw/Tools/Melee/ActionCommon.cs": {
+      "original": "c32afb0db0d649779ac132accd1894c13f00b541b18487d23b080445113fad1c",
+      "patched": "43544a079862320cde82b2110a9d3756764224d83178acac9e05a4aeddc29e2f"
+    },
+    "HSDRaw/Tools/Melee/ActionCompiler.cs": {
+      "original": "65370aa2fe740678cd18d0bcfe647a1356d59fc1b07da0e92c377d98fb50fe20",
+      "patched": "aef9f9fca627ffd06af196a5bff5129ff1ff7285ee32537e4c298e61d76d9507"
+    }
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "generator": "Built-in image_gen",
+  "background": "Use the game's original animated menu background. User explicitly rejected generating a replacement.",
+  "references": [
+    {
+      "path": "build/comparisons/menu-additions/options-list/frame_000990_look.png",
+      "role": "Original Melee Options art style"
+    },
+    {
+      "path": "build/comparisons/netplay-ui/16x9/browser.png",
+      "role": "Approved browser layout"
+    },
+    {
+      "path": "build/comparisons/netplay-ui/4x3/host-ready.png",
+      "role": "Approved lobby layout"
+    },
+    {
+      "url": "https://www.nintendo.co.jp/ngc/control/control.jpg",
+      "path": "build/ui-art-references/nintendo-original-gamecube-controller.jpg",
+      "role": "Original GameCube control geometry"
+    }
+  ],
+  "prompts": {
+    "chrome": "Use case: stylized-concept. Asset type: transparent game UI chrome overlay, foreground ONLY. DO NOT generate a backdrop.\nInput images: Image1 is the actual original Super Smash Bros. Melee Options screen, explicit style authority. Images2 and3 are the approved netplay browser/lobby whose red outer frame should become this reusable asset. Image4 irrelevant.\nCreate ONLY the red-orange Melee VS-style outer frame and blank angular header tab on a genuinely transparent 4:3 canvas. All canvas outside and inside the frame must have transparent alpha. No background, no text, no labels, no controller, no other panels or contents.\nUse this exact geometry on a conceptual800x600 canvas: rounded outer frame left33 top83 right767 bottom542, corner radius28. Main interior opening x48..752,y99..527 must be fully transparent. Thick flat dark maroon outer band, vermilion center stripe, thin warm pale-red/ivory highlight. Along the top edge, a blank dark-red header tab steps up from x242,y89 through x265,y54 to x737,y54, returning to x715,y89. Leave the area x95..230,y45..78 transparent for runtime text. Two thin diagonal red accent strokes near the header's right end. Leave the bottom60px transparent for a live help bar.\nMatch original Melee's simple early-2000s beveled menu shapes using flat stepped color bands. Crisp front-facing 2D geometry, restrained palette, no gloss, no texture, no gradients, no blur, no glow, no shadows, no perspective. Keep exact4:3 composition and generous transparent gutters. No words or symbols anywhere.",
+    "controller": "Use case: stylized-concept. Asset type: transparent flat GameCube controller illustration for a Melee lobby player card; foreground ONLY.\nInput images: Image1 is the ACTUAL ORIGINAL Super Smash Bros. Melee Options screen: explicitly use its small schematic silver equipment illustration as the style reference, simplified to flat fills. Images2/3 show target player cards. Image4 is Nintendo's official original GameCube controller photograph: authoritative for physical control layout and shell silhouette. Use only its FRONT controller as layout reference.\nCreate one platinum/silver ORIGINAL GAMECUBE CONTROLLER, strict orthographic front elevation, fully visible and centered on real transparent alpha. No cable, plug, rear view, hands, scene, backdrop or extra objects. Recognizable two descending handles, shallow center notch, left and right control islands. Flat muted silver shell, darker slate insets, thin ivory outlines. Economical flat artwork clearly readable at148px wide.\nAccurate hardware controls: upper-left gray analog stick with octagonal gate; gray plus-shaped D-pad below and inward. Right cluster: LARGE green circular A, SMALL red circular B diagonally down-left of A, gray X as TALL narrow kidney/oval immediately RIGHT of A, gray Y as WIDE shallow kidney/oval ABOVE and slightly left of A. Yellow C-stick nub inside an octagonal gate BELOW right cluster. Small gray Start/Pause circle between upper control islands. Gray L/R shoulders peeking along top; tiny purple Z near top-right shoulder. C-stick must be a yellow analog nub, not a D-pad. Proper button positions, sizes and missing X/Y buttons are crucial.\nFlat colors only: restrained silver, slate, ivory, teal-green A, deep red B, golden-yellow C and purple Z. Zero gradients, realistic materials, gloss, reflections, texture, shadows or angled side thickness. Symmetrical orthographic shell silhouette, correct asymmetric controls. Do not copy the inaccurate simplified button arrangement in the current lobby. No branding text/logo. Tiny upright A B X Y and C labels on their respective controls may be included only if clean and correct; no other lettering. Object fills70-80percent of square canvas. Real alpha outside."
+  },
+  "controller_flat_correction": "Edit only the most recent silver GameCube controller image. Preserve its exact front-facing silhouette, correct control placement, A/B sizes, correct upright X/Y labels and gray kidney shapes, gray octagonal stick gate, gray D-pad, yellow C-stick, small central Start button, shoulder controls, clean ivory outlines, and real transparent alpha background. Flatten all shaded surfaces into a strict limited solid-color palette. The silver shell must be ONE uniform medium silver-gray fill throughout, with zero shading variations, gradients, mottling, paper texture, noise or metallic lighting. Inset islands each ONE uniform dark slate fill. Buttons each flat uniform color with only sharply bounded thin rim bands. Keep the concentric stick lines crisp and flat. This should look screen-printed or like a clean flat 2D vector game UI pictogram, explicitly matching the schematic equipment art in Super Smash Bros. Melee Options, not a render or painted illustration. No new objects, no backdrop, no added text or logos. Preserve transparent background and whole controller without clipping.",
+  "selected_assets": [
+    "assets/ui/netplay/chrome-frame-v1.png",
+    "assets/ui/netplay/controller-flat-v2.png"
+  ],
+  "glyphs": "Deterministic font-independent SVG paths and PNG exports in assets/ui/gamecube."
+}

@@ -1,0 +1,114 @@
+const fs=require('node:fs/promises');
+const path=require('node:path');
+const assert=require('node:assert/strict');
+const {setTimeout:delay}=require('node:timers/promises');
+async function run({win,worker,dialog,ROOT,CHECK_DIR}) {
+  await fs.mkdir(CHECK_DIR,{recursive:true});
+  win.showInactive();
+  const errors=[]; win.webContents.on('console-message',(_event,_level,message)=>{if(_level>=3)errors.push(message);});
+  const js=code=>win.webContents.executeJavaScript(code);
+  const capture=async(name)=>{await js('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');await delay(200);await fs.writeFile(path.join(CHECK_DIR,name),(await win.webContents.capturePage()).toPNG());};
+  const wait=async(code,timeout=60000)=>{const deadline=Date.now()+timeout;while(!await js(code)){if(Date.now()>deadline)throw new Error('UI wait failed: '+code+'; '+await js("document.querySelector('#status').textContent"));await delay(150);}};
+  await wait("document.querySelector('#viewport-status').textContent.includes('63 joints')");
+  const settings=win.webContents.getLastWebPreferences();
+  assert.equal(settings.contextIsolation,true);assert.equal(settings.nodeIntegration,false);assert.equal(settings.sandbox,true);
+  assert.equal(await js('typeof require'),'undefined');
+  assert.equal(await js('location.protocol'),'workshop:');
+  const catalog=await js("window.workshop.request('/api/catalog')");
+  assert.equal(catalog.fighters.filter(f=>f.stock).length,26);
+  await js("document.querySelector('#move-search').value='Attack11';document.querySelector('#move-search').dispatchEvent(new Event('input'));document.querySelector('[data-move=\"46\"]').click()");
+  await wait("document.querySelector('#status').textContent.includes('Attack11')");
+  await js("document.querySelector('#timeline').value=3;document.querySelector('#timeline').dispatchEvent(new Event('input'));document.querySelector('#show-hurt').click()");
+  const fighter={viewport:await js("document.querySelector('#viewport-status').textContent"),damage:await js("document.querySelector('#detail-content').textContent")};
+  assert.match(fighter.damage,/2%/);
+  await capture('character.png');
+  await js("document.querySelector('#show-hurt').click()");
+  // Regression: only the active costume form appears; low-poly and swap meshes stay separate.
+  async function chooseFighter(id,name){await js(`document.querySelector('[data-id="${id}"]').click()`);await wait(`document.querySelector('#status').textContent===${JSON.stringify(name+' loaded')}`);}
+  async function chooseMove(id){await js(`document.querySelector('[data-move="${id}"]').click()`);await wait(`document.querySelector('[data-move="${id}"]').classList.contains('selected') && document.querySelector('#status').textContent.includes('frames')`);}
+  async function setFrame(frame){await js(`document.querySelector('#timeline').value=${frame};document.querySelector('#timeline').dispatchEvent(new Event('input'))`);}
+  const visible=()=>js("document.querySelector('#viewport').dataset.visibleDobjs.split(',').filter(Boolean).map(Number).sort((a,b)=>a-b)");
+  await chooseFighter('stock-Ss','Samus');
+  let samusDefault=await visible();assert(!samusDefault.includes(19));assert(!samusDefault.includes(39));assert.equal(samusDefault.length,62);
+  await capture('samus-main.png');
+  await chooseMove(309);await setFrame(10);assert.deepEqual(await visible(),[39]);await capture('samus-morph-ball.png');
+  await setFrame(43);assert.deepEqual(await visible(),[19]);await setFrame(49);assert.deepEqual(await visible(),samusDefault);
+  await chooseFighter('stock-Kb','Kirby');assert.deepEqual(await visible(),[3,4,5,6,7,18,19]);await capture('kirby-main.png');
+  await chooseMove(333);assert.deepEqual(await visible(),[20,21,22]);await capture('kirby-stone.png');
+  await js("document.querySelector('[data-tab=\"submodels\"]').click();document.querySelector('[data-preview-part=\"part:0:6\"]').click()");assert.deepEqual(await visible(),[30]);
+  await js("document.querySelector('#model-preview').value='auto';document.querySelector('#model-preview').dispatchEvent(new Event('change'))");
+  await chooseFighter('stock-Ca','Captain Falcon');
+  // Complete clone -> movescript -> texture -> Blender export through desktop IPC.
+  await js("document.querySelector('#clone').click();document.querySelector('#clone-name').value='Pipeline Check';document.querySelector('#confirm-clone').click()");
+  await wait("document.querySelector('#status').textContent.includes('Clone created')",120000);
+  const cloneCatalog=await js("window.workshop.request('/api/catalog')");
+  const cloneId=await js("document.querySelector('.asset.selected').dataset.id");const clone=cloneCatalog.fighters.find(f=>f.id===cloneId);assert(clone&&!clone.stock);
+  await js('document.querySelector("[data-tab=lua]").click()');
+  await wait('!!document.querySelector("#lua-source")');
+  const luaSource='local fighter = { api_version = 1 }\nfunction fighter.on_spawn(self) self:log("Workshop Lua check") end\nfunction fighter.on_frame(self) local state = self:state() end\nreturn fighter\n';
+  await js(`document.querySelector('#lua-source').value=${JSON.stringify(luaSource)};document.querySelector('#lua-validate').click()`);
+  await wait("document.querySelector('#lua-diagnostic').textContent.includes('syntax is valid')");
+  await js("document.querySelector('#lua-save').click()");
+  await wait("document.querySelector('#status').textContent.includes('Saved scripts/fighter.lua')");
+  const savedLua=await js(`window.workshop.request('/api/lua?id=${clone.id}')`);assert.equal(savedLua.source,luaSource);assert.equal(savedLua.enabled,true);
+  await js("document.querySelector('#lua-source').value='function broken( end';document.querySelector('#lua-validate').click()");
+  await wait("document.querySelector('#lua-diagnostic').textContent.includes('expected')");
+  assert.equal((await js(`window.workshop.request('/api/lua?id=${clone.id}')`)).source,luaSource);
+  await capture('lua-editor.png');
+  await js('document.querySelector("[data-tab=moves]").click()');
+  await chooseMove(46);
+  await js("document.querySelector('#move-script').value=document.querySelector('#move-script').value.replaceAll('Damage=2,','Damage=7,');document.querySelector('#apply-script').click()");
+  await wait("document.querySelector('#status').textContent.includes('Movescript compiled')",120000);
+  const edited=await js(`window.workshop.request('/api/fighter?id=${clone.id}')`);
+  const original=await js("window.workshop.request('/api/fighter?id=stock-Ca')");
+  assert(edited.moves[46].script.includes('Damage=7,'));assert(original.moves[46].script.includes('Damage=2,'));
+  const textureDialog=dialog.showOpenDialog;
+  dialog.showOpenDialog=async()=>({canceled:false,filePaths:[path.join(ROOT,'tools/modkit/examples/falcon/texture-21.png')]});
+  await js(`window.workshop.importTexture({id:'${clone.id}',costume:'PlCaNr.dat',kind:'texture',image:21})`);
+  const textures=await js(`window.workshop.request('/api/textures?id=${clone.id}&costume=PlCaNr.dat')`);
+  assert(textures.images.find(i=>i.id===21).changed);
+  await js("document.querySelector('[data-tab=\"textures\"]').click()");
+  await wait("document.querySelectorAll('.texture-card').length>50",120000);await capture('texture-comparison.png');
+  dialog.showOpenDialog=textureDialog;
+  await chooseFighter('stock-Ca','Captain Falcon');
+  // Exercise the real preload/main/worker export path with a deterministic native-dialog result.
+  const oldSave=dialog.showSaveDialog,oldOpen=dialog.showOpenDialog;
+  const exportPath=path.join(CHECK_DIR,'Captain Falcon.glb');
+  dialog.showSaveDialog=async()=>({canceled:false,filePath:exportPath});
+  await js("document.querySelector('#export').click()");
+  await wait("document.querySelector('#status').textContent.startsWith('Saved ')");
+  assert.equal((await fs.readFile(exportPath)).subarray(0,4).toString(),'glTF');
+  dialog.showOpenDialog=async()=>({canceled:true,filePaths:[]});
+  await js("document.querySelector('#import-stage').click()");
+  await wait("document.querySelector('#status').textContent==='Import canceled'");
+  // Import and compile into a worker-only test catalog, never the user's mod directory.
+  const input=path.join(CHECK_DIR,'Electron Import Check.glb');
+  await fs.copyFile(path.join(ROOT,'tools/modkit/examples/WorkshopArena.glb'),input);
+  dialog.showOpenDialog=async()=>({canceled:false,filePaths:[input]});
+  await js("document.querySelector('#import-stage').click()");
+  await wait("document.querySelector('#status').textContent.startsWith('Scene imported.')",120000);
+  await wait("document.querySelector('#viewport-status').textContent.includes('triangles')");
+  await js("document.querySelector('#save').click()");
+  await wait("document.querySelector('#status').textContent.startsWith('Saved.')",120000);
+  const stageCatalog=await js("window.workshop.request('/api/catalog')");
+  const stage=stageCatalog.stages.findLast(s=>s.name==='Electron Import Check');
+  assert(stage?.enabled);
+  const compiled=await fs.readFile(path.join(CHECK_DIR,'mods',stage.id,'stage.dat'));
+  assert.equal(compiled.readUInt32BE(0),compiled.length);
+  await capture('stage.png');
+  // Real glTF companion resolution, including a nested buffer directory.
+  const fixture=path.join(CHECK_DIR,'companion-scene');await fs.mkdir(path.join(fixture,'buffers'),{recursive:true});
+  const bytes=Buffer.alloc(42);[-10,0,0,10,0,0,0,20,0].forEach((x,i)=>bytes.writeFloatLE(x,i*4));[0,1,2].forEach((x,i)=>bytes.writeUInt16LE(x,36+i*2));
+  await fs.writeFile(path.join(fixture,'buffers','geometry.bin'),bytes);
+  const gltf={asset:{version:'2.0'},buffers:[{uri:'buffers/geometry.bin',byteLength:42}],bufferViews:[{buffer:0,byteOffset:0,byteLength:36},{buffer:0,byteOffset:36,byteLength:6}],accessors:[{bufferView:0,componentType:5126,count:3,type:'VEC3',min:[-10,0,0],max:[10,20,0]},{bufferView:1,componentType:5123,count:3,type:'SCALAR'}],meshes:[{primitives:[{attributes:{POSITION:0},indices:1}]}],nodes:[{mesh:0,name:'Main mesh'}],scenes:[{nodes:[0]}],scene:0};
+  const gltfPath=path.join(fixture,'Companion Check.gltf');await fs.writeFile(gltfPath,JSON.stringify(gltf));
+  dialog.showOpenDialog=async()=>({canceled:false,filePaths:[gltfPath]});
+  await js("document.querySelector('#import-stage').click()");
+  await wait("document.querySelector('#asset-name').textContent==='Companion Check' && document.querySelector('#status').textContent.startsWith('Scene imported.')",120000);
+  const denied=await js("window.workshop.request('/api/not-allowed').then(()=>false,()=>true)");assert(denied);
+  dialog.showSaveDialog=oldSave;dialog.showOpenDialog=oldOpen;
+  assert.equal(errors.length,0,errors.join('\n'));
+  await fs.writeFile(path.join(CHECK_DIR,'report.json'),JSON.stringify({passed:true,workerPid:worker.child.pid,url:win.webContents.getURL(),sandbox:settings.sandbox,contextIsolation:settings.contextIsolation,stockFighters:26,fighter,nativeExportBytes:(await fs.stat(exportPath)).size,stage:{id:stage.id,compiledBytes:compiled.length},characterPipeline:{id:clone.id,independentDamage:true,textureImport:true,originalComparison:true,lua:{saved:true,syntaxValidation:true,rejectsInvalidSource:true}},submodels:{samus:true,kirby:true},gltfCompanionImport:true,importCancellation:true,blockedUnknownIPC:denied,errors},null,2));
+  console.log('Electron desktop checks passed. '+CHECK_DIR);
+}
+module.exports={run};

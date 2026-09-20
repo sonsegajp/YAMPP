@@ -1,0 +1,37 @@
+{
+  "schema": 1,
+  "builds": [
+    {
+      "id": "akaneia",
+      "name": "The Akaneia Build",
+      "version": "1.0.1",
+      "repository": "akaneia/akaneia-build",
+      "commit": "dc1b405add7fbefc4140b5226bf4f087b16bad73",
+      "releasePage": "https://github.com/akaneia/akaneia-build/releases/tag/1.0.1",
+      "archive": {
+        "name": "Akaneia.Builder.1.0.1.7z",
+        "url": "https://github.com/akaneia/akaneia-build/releases/download/1.0.1/Akaneia.Builder.1.0.1.7z",
+        "size": 246177787,
+        "sha256": "7d46ce47b27272a369150cb105f4cb3b046b2e7790d233595ff4537ef442919f"
+      },
+      "project": {
+        "name": "akaneia.mexproj",
+        "url": "https://raw.githubusercontent.com/akaneia/akaneia-build/dc1b405add7fbefc4140b5226bf4f087b16bad73/akaneia.mexproj",
+        "size": 5615,
+        "sha256": "432dc44bd2d01fffcea3922fd56e9c78891c1542d1e0bf5c680dc84b1182d8ca"
+      },
+      "patch": {
+        "path": "Akaneia Builder/patch.xdelta",
+        "size": 244145669,
+        "sha256": "005d5667dffa345bfba5f08e6849a4ff2965633584e8a3da74ceba7556204608"
+      },
+      "windowsPatcher": {
+        "path": "Akaneia Builder/Windows/xdelta.exe",
+        "sha256": "6855c01cf4a1662ba421e6f95370cf9afa2b3ab6c148473c63efe60d634dfb9a"
+      },
+      "baseMD5": "0e63d4223b01d9aba596259dc155a174",
+      "resultMD5": "63ea8e113e451c9369f17f7a49012412",
+      "resultDolSHA256": "f604e1399f2dc88e2fbbaa2b3441867ca34d00b99b82e16bee4e4ef108604805"
+    }
+  ]
+}

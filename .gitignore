@@ -1,0 +1,51 @@
+# Extracted game files. Never commit these: they are the disc's contents, and
+# every player supplies their own copy.
+/data/
+/user/
+
+# Build output, including the recompiled game sources generated from the disc's
+# executable - also the disc's contents, in another form.
+/build/
+/dist/*
+!/dist/template/
+
+# Third-party sources, fetched by commit (see config/project.xml).
+/upstream/
+
+# Dependencies and caches
+node_modules/
+__pycache__/
+*.pyc
+
+# Binaries
+*.o
+*.a
+*.obj
+*.exe
+*.dll
+*.lib
+*.exp
+*.pdb
+
+# Disc images, in case one is ever put here
+*.iso
+*.gcm
+*.rvz
+*.wia
+
+# Local mod packages and generated game-derived UI data are never source assets.
+/assets/costumes/
+/tools/modkit/examples/
+/native/host/gxrt/menu_labels.inc
+/native/host/aurora_shim/netplay_fonts.inc
+/config/online.xml
+/config/community.xml
+**/obj/
+**/bin/
+*.dat
+*.usd
+*.hps
+*.dol
+*.raw
+*.gxt
+*.gcm

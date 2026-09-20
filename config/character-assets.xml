@@ -1,0 +1,29 @@
+<?xml version='1.0' encoding='utf-8'?>
+<character-assets schema="1" source="MnSlChr.usd">
+  <fighter prefix="Dr" image="16" />
+  <fighter prefix="Gn" image="18" />
+  <fighter prefix="Fc" image="20" />
+  <fighter prefix="Cl" image="22" />
+  <fighter prefix="Pc" image="24" />
+  <fighter prefix="Fe" image="26" />
+  <fighter prefix="Ms" image="28" />
+  <fighter prefix="Gw" image="30" />
+  <fighter prefix="Mt" image="32" />
+  <fighter prefix="Pr" image="34" />
+  <fighter prefix="Pk" image="36" />
+  <fighter prefix="Lk" image="38" />
+  <fighter prefix="Zd" image="40" />
+  <fighter prefix="Sk" image="40" />
+  <fighter prefix="Ss" image="42" />
+  <fighter prefix="Kb" image="44" />
+  <fighter prefix="Pp" image="46" />
+  <fighter prefix="Ns" image="48" />
+  <fighter prefix="Fx" image="50" />
+  <fighter prefix="Ca" image="52" />
+  <fighter prefix="Dk" image="54" />
+  <fighter prefix="Ys" image="56" />
+  <fighter prefix="Pe" image="58" />
+  <fighter prefix="Kp" image="60" />
+  <fighter prefix="Lg" image="62" />
+  <fighter prefix="Mr" image="64" />
+</character-assets>

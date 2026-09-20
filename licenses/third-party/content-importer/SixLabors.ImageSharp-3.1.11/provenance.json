@@ -1,0 +1,8 @@
+{
+  "package": "SixLabors.ImageSharp",
+  "version": "3.1.11",
+  "source": "https://www.nuget.org/packages/SixLabors.ImageSharp/3.1.11",
+  "notices": [
+    "LICENSE"
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "package": "System.Drawing.Common/8.0.30",
+  "authors": "Microsoft",
+  "copyright": "\u00a9 Microsoft Corporation. All rights reserved.",
+  "licenseExpression": "MIT",
+  "repository": "https://github.com/dotnet/winforms",
+  "commit": "3bde17662ffbf8c378d06d58f99da47eb047eb23",
+  "upstreamLicense": null,
+  "files": [
+    {
+      "name": "LICENSE.TXT",
+      "sha256": "a89886665765362eb77e0f8e26602c924520041d1711b2eedc136434fe4d01ab"
+    },
+    {
+      "name": "THIRD-PARTY-NOTICES.TXT",
+      "sha256": "093e2589a27ed137e519b9856e425efa7982221a7b3d9e7cea3b5153f711905e"
+    }
+  ]
+}

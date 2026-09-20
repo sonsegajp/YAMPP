@@ -1,0 +1,94 @@
+{
+  "source_url": "https://www.nintendo.co.jp/ngc/thisis/grap/gamecube.jpg",
+  "source_local": "build\\ui-art-references\\nintendo-gamecube-original-hires.jpg",
+  "source_sha256": "e40991da46c3c5adfb875431e254c81f614a89657e1d7e384b6b6c0c579be683",
+  "source_size": [
+    880,
+    1170
+  ],
+  "controller_crop": [
+    233,
+    691,
+    662,
+    1031
+  ],
+  "controller": "controller.png",
+  "processing": "Source RGB pixels are unchanged. Authored alpha masks and integer-coordinate crops only; glyph128 exports duplicate each source pixel2x with nearest-neighbor.",
+  "glyph_canvas": [
+    128,
+    128
+  ],
+  "logical_ui_size": [
+    32,
+    32
+  ],
+  "do_not_trim": true,
+  "glyphs": {
+    "a": {
+      "file": "a.png",
+      "source_crop": [
+        551,
+        827,
+        612,
+        887
+      ],
+      "offset_on_64_canvas": [
+        1,
+        2
+      ]
+    },
+    "b": {
+      "file": "b.png",
+      "source_crop": [
+        511,
+        858,
+        553,
+        901
+      ],
+      "offset_on_64_canvas": [
+        11,
+        10
+      ]
+    },
+    "x": {
+      "file": "x.png",
+      "source_crop": [
+        613,
+        816,
+        647,
+        871
+      ],
+      "offset_on_64_canvas": [
+        15,
+        4
+      ]
+    },
+    "y": {
+      "file": "y.png",
+      "source_crop": [
+        541,
+        789,
+        597,
+        828
+      ],
+      "offset_on_64_canvas": [
+        4,
+        12
+      ]
+    },
+    "start-pause": {
+      "file": "start-pause.png",
+      "source_crop": [
+        436,
+        836,
+        462,
+        864
+      ],
+      "offset_on_64_canvas": [
+        19,
+        18
+      ]
+    }
+  },
+  "omitted": "L/R are partly occluded and Z is edge-on; no invented LRZ cutouts."
+}

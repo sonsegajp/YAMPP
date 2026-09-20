@@ -1,0 +1,51 @@
+--- a/HSDRaw/Tools/Melee/ActionCommon.cs
++++ b/HSDRaw/Tools/Melee/ActionCommon.cs
+@@ -150,22 +150,23 @@
+             o.Write(Command, 6);
+ 
+             if (param.Length != ParamCount && param.Length != 1) return null;
+-            for (int i = 0; i < param.Length; i++)
+-            {
+-                int v = 0;
+-                if (param[i].Length < 1) continue;
+-                string val = param[i].Split('=')[1];
+-                if (val.Contains("x"))
+-                    v = Convert.ToInt32(val.Split('x')[1], 16);
+-                else
+-                    v = int.Parse(val);
+-                o.Write(v, BMap[i].Count);
+-            }
+-
++            int parameter = 0;
++            foreach (var field in BMap)
++            {
++                if (field.Name == "None") { o.Write(0,field.Count); continue; }
++                if (parameter >= param.Length || !param[parameter].Contains("="))
++                    throw new Exception("Missing " + Name + " parameter " + field.Name);
++                string[] pair = param[parameter++].Split('=');
++                if (pair[0] != field.Name) throw new Exception("Expected parameter " + field.Name);
++                string value = pair[1];
++                long number = value.StartsWith("0x",StringComparison.OrdinalIgnoreCase) ? Convert.ToInt64(value.Substring(2),16) : long.Parse(value);
++                if (field.Count < 63 && (number >= (1L << field.Count) || number < -(1L << (field.Count-1))))
++                    throw new Exception("Parameter exceeds its " + field.Count + " bit field: " + field.Name);
++                o.Write(number,field.Count);
++            }
++            o.Align();
+             var data = o.Bytes.ToArray();
+-
+-            if (data.Length % 8 != 0)
+-                throw new Exception("Subaction " + Command.ToString() + " was unsuccessfully compiled");
++            if (data.Length != ByteSize) throw new Exception("Invalid command size: " + Name);
+ 
+             return data;
+         }
+--- a/HSDRaw/Tools/Melee/ActionCompiler.cs
++++ b/HSDRaw/Tools/Melee/ActionCompiler.cs
+@@ -88,6 +88,7 @@
+                     var cname = Regex.Match(c, @".+?(?=\()").Value;
+                     var cparameters = Regex.Match(c, @"(?<=\().+?(?=\))").Value.Split(',');
+ 
++                    if (string.IsNullOrEmpty(cname)) continue;
+                     byte flag = ActionCommon.GetMeleeCMDAction(cname).Command;
+ 
+                     if (flag == 0x5 || flag == 0x7) //goto and subroutine

@@ -1,0 +1,19 @@
+{
+  "package": "Microsoft.Extensions.ObjectPool/5.0.10",
+  "authors": "Microsoft",
+  "copyright": "\u00a9 Microsoft Corporation. All rights reserved.",
+  "licenseExpression": "Apache-2.0",
+  "repository": "https://github.com/dotnet/aspnetcore",
+  "commit": "b92c9f50f0333ea661785ba849f303cde6a93844",
+  "upstreamLicense": "https://raw.githubusercontent.com/dotnet/aspnetcore/b92c9f50f0333ea661785ba849f303cde6a93844/LICENSE.txt",
+  "files": [
+    {
+      "name": "THIRD-PARTY-NOTICES.TXT",
+      "sha256": "fcf3e943c68c1bb5b3062d7511c589a96f3821af8cf8c9d1708874d413ea3300"
+    },
+    {
+      "name": "UPSTREAM-LICENSE.txt",
+      "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+    }
+  ]
+}
