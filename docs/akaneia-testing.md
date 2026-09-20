@@ -24,7 +24,7 @@ The plan helper verifies content before activation. Plans are parsed completely 
 
 ## Implementation
 
-Original game functions are recompiled to native code. Added or modified PowerPC functions use a shared-memory execution engine, with native callbacks retaining menu hooks and device boundaries. Original Options hooks must also run when m-ex replaces their enclosing game function; missing those hooks caused the absent Widescreen row and old Controller hover illustration.
+Original game functions run as native PC code. Added or modified PowerPC functions use a shared-memory execution engine, with native callbacks retaining menu hooks and device boundaries. Original Options hooks must also run when m-ex replaces their enclosing game function; missing those hooks caused the absent Widescreen row and old Controller hover illustration.
 
 The performance pass batches register transfers without combining guest instructions. Exact, byte-guarded native variants handle m-ex's wider texture-palette index and complete joint scale-compensation patch. Any additional patch falls back to dynamic execution. The matrix variant is generated from Ploaj's m-ex assembly, including its relocated return addresses and custom scale compensation. Generated C and comparison bytes remain under ignored `build/` and require the user's verified original DOL.
 

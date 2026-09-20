@@ -2,7 +2,7 @@
 
 ![Yet Another Melee PC Port](assets/branding/yampp-logo.png)
 
-YAMPP is an experimental PC port of Super Smash Bros. Melee USA 1.02, built by statically recompiling the original PowerPC program and connecting it to a native runtime and Aurora graphics. The tested play build targets Windows; experimental native Linux build support is also included. Melee Workshop provides local fighter, stage and texture editing.
+YAMPP is an experimental PC port of Super Smash Bros. Melee USA 1.02, based on the [Melee decompilation](https://github.com/doldecomp/melee), with a native PC runtime and Aurora graphics. The tested play build targets Windows; experimental native Linux build support is also included. Melee Workshop provides local fighter, stage and texture editing.
 
 Supply your own **NTSC-U 1.02 / GALE01 revision 2** disc image. This source tree and the distribution contain no disc images, extracted game files, installed mods or memory cards. First-run setup extracts your image locally. Original game art, fonts, models, music and animations remain Nintendo/HAL Laboratory's work.
 
@@ -21,7 +21,7 @@ Keyboard defaults: WASD = main stick, X = A, Z = B, C/V = X/Y, Enter = Start, Q/
 
 ## Create
 
-Start with the [modding guide](docs/modding.md): additive costumes and their artwork, fighter clones and Lua, stage imports, validation and Workshop publishing. [Custom music](docs/custom-music.md) documents folders, decoding and limits. [How YAMPP works](docs/architecture.md) explains recompilation, rendering, rollback and content isolation.
+Start with the [modding guide](docs/modding.md): additive costumes and their artwork, fighter clones and Lua, stage imports, validation and Workshop publishing. [Custom music](docs/custom-music.md) documents folders, decoding and limits. [How YAMPP works](docs/architecture.md) explains the decompilation basis, native runtime, rendering, rollback and content isolation.
 
 See the [actual UI screenshots](docs/screenshots/README.md) for the Online menus and aspect-ratio options.
 

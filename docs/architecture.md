@@ -1,5 +1,7 @@
 # How YAMPP works
 
+YAMPP is a PC port based on the [Melee decompilation](https://github.com/doldecomp/melee). The pinned decompilation supplies function identities, structures and the reference for original engine and menu behavior; YAMPP adds native platform services, Aurora rendering and PC features.
+
 The input is Melee USA 1.02's `main.dol` and the files extracted from the player's disc. `scripts/regenerate_game.py` generates native C for the supported PowerPC program. The native executable runs that translated code against a 24 MiB guest address space; host modules implement platform services and selected hooks. Generated C is output: change the generator, hook configuration or runtime, then regenerate.
 
 Aurora translates GameCube GX commands into modern graphics work. SDL supplies windows, input and audio. Melee's original menu scene, camera and animation remain in control; additional UI follows its transforms and uses fonts derived locally from the player's game. PC settings and the community browser supply host-side interaction through a versioned shared UI structure.
