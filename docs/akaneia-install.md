@@ -1,6 +1,6 @@
 # Installing Akaneia in YAMPP
 
-Applies to **v0.1.0-preview.2 and later**.
+Applies to **v0.1.0 and later**.
 
 YAMPP supports Akaneia; it does not distribute it. The Windows preview includes an importer, not the mod, a prepatched disc or its assets. Akaneia remains the work of the Akaneia team. This YAMPP release supports the pinned official **Akaneia 1.0.1** release.
 

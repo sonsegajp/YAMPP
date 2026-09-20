@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import tempfile
 import xml.etree.ElementTree as ET
 import zipfile
 
@@ -31,6 +32,26 @@ def copy(source, dest):
                 copy(child, dest / child.name)
     else:
         shutil.copy2(source, dest)
+
+
+def check_setup_entrypoint(out):
+    """Exercise the shipped EXE without a game, launch plan, or renderer.
+
+    A tiny invalid disc must reach the native extractor and be rejected there.
+    This catches packaging a gameplay-only host that blocks first-run setup.
+    """
+    env = {key: value for key, value in os.environ.items()
+           if not key.upper().startswith(('MELEE_', 'GCN_'))}
+    env['PATH'] = str(out / 'bin') + os.pathsep + str(Path(os.environ['SystemRoot']) / 'System32')
+    with tempfile.TemporaryDirectory(prefix='yampp-setup-check-') as temporary:
+        root = Path(temporary)
+        image = root / 'invalid test image.iso'
+        image.write_bytes(b'YAMPP setup regression fixture')
+        result = subprocess.run([str(out / 'bin/YAMPP.exe'), '--extract', str(image), str(root / 'output')],
+                                cwd=root, env=env, capture_output=True, text=True, timeout=30)
+        if result.returncode != 1 or 'image is too short' not in result.stderr:
+            raise ValueError('Packaged first-run extraction failed: ' + result.stdout + result.stderr)
+    print('Verified packaged first-run extraction entry point')
 
 
 def audit(out):
@@ -152,6 +173,7 @@ def main():
     (out/'config').mkdir(exist_ok=True)
     config.write(out/'config/project.xml', encoding='utf-8', xml_declaration=True)
     copy(ROOT/'config/character-assets.xml', out/'config/character-assets.xml')
+    check_setup_entrypoint(out)
     entries = audit(out)
     (out/'distribution-manifest.json').write_text(json.dumps({'name':'Yet Another Melee PC Port',
         'shortName':'YAMPP', 'files':entries}, indent=2), encoding='utf-8')

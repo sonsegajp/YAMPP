@@ -62,6 +62,19 @@ int main(int argc,char**argv){
  SetUnhandledExceptionFilter(host_fault);
  setvbuf(stdout,NULL,_IONBF,0);
  char core[4096];GetModuleFileNameA(NULL,core,sizeof core);char*dot=strrchr(core,'.');if(!dot)return 2;strcpy(dot,".core.dll");
+ /* Setup has no installed game or launch plan yet. Dispatch extraction to
+  * the existing core entry point before loading the renderer or reading any
+  * gameplay state. The core handles --extract before initializing the game. */
+ if(argc>1&&!strcmp(argv[1],"--extract")){
+  if(argc!=4){fprintf(stderr,"Usage: YAMPP --extract <disc image> <output folder>\n");return 2;}
+  HMODULE runtime=LoadLibraryA(core);
+  if(!runtime){fprintf(stderr,"[setup] Runtime load failed %lu. Extract the complete YAMPP ZIP.\n",GetLastError());return 2;}
+  int(*extract)(int,char**)=(void*)GetProcAddress(runtime,"yampp_runtime_main");
+  if(!extract){fprintf(stderr,"[setup] Runtime entry point missing\n");FreeLibrary(runtime);return 2;}
+  int result=extract(argc,argv);
+  FreeLibrary(runtime);
+  return result;
+ }
  const char*render_path=getenv("MELEE_AURORA_DLL"),*plan=getenv("MELEE_CONTENT_BOOT_PLAN");
  if(!render_path||!plan||!plan_read(plan)){fprintf(stderr,"[content-host] Missing verified launch plan\n");return 2;}
  env_set("MELEE_RUNTIME_HOSTED","1");env_set("MELEE_RUNTIME_CORE",core);

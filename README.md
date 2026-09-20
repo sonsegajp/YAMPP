@@ -8,7 +8,7 @@ Supply your own **NTSC-U 1.02 / GALE01 revision 2** disc image. This source tree
 
 ## Play
 
-**[Download the Windows preview](https://github.com/sonsegajp/YAMPP/releases/latest)** and extract the entire ZIP. The distribution starts with **Play YAMPP.cmd** and follows the original opening FMV to the title screen; A/Start skips the movie. **Setup.cmd** selects and validates your disc. **Melee Workshop.cmd** opens the editor. Source checkouts retain only the normal **Run-Melee.cmd** and **Run-Workshop.cmd** launchers; test utilities are under `scripts/`. See [setup and building](docs/building.md).
+**[Download the Windows release](https://github.com/sonsegajp/YAMPP/releases/latest)** and extract the entire ZIP. The distribution starts with **Play YAMPP.cmd** and follows the original opening FMV to the title screen; A/Start skips the movie. **Setup.cmd** selects and validates your disc. **Melee Workshop.cmd** opens the editor. Source checkouts retain only the normal **Run-Melee.cmd** and **Run-Workshop.cmd** launchers; test utilities are under `scripts/`. See [setup and building](docs/building.md).
 
 Keyboard defaults: WASD = main stick, X = A, Z = B, C/V = X/Y, Enter = Start, Q/E = L/R, Shift = Z, IJKL = C-stick, arrow keys = D-pad. SDL gamepads are supported. F1 opens PC settings.
 
