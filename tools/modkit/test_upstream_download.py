@@ -58,6 +58,27 @@ class UpstreamDownloadTests(unittest.TestCase):
     def test_corrupt_cache_is_reverified(self):
         target=self.folder/"test.7z";target.write_bytes(b"x"*len(self.data))
         self.assertFalse(ud._verified(target,self.spec));self.fetch(self.data);self.assertTrue(ud._verified(target,self.spec))
+    def test_folder_first_missing_archive_never_downloads(self):
+        with patch.object(ud,"ROOT",self.folder),patch.object(ud,"_download") as network:
+            with self.assertRaisesRegex(ValueError,"user/imports"):ud._archive(self.folder,self.spec,False)
+            network.assert_not_called()
+    def test_valid_local_archive_is_copied_and_original_retained(self):
+        inbox=self.folder/"user/imports";inbox.mkdir(parents=True);local=inbox/self.spec["name"];local.write_bytes(self.data)
+        cache=self.folder/"cache";cache.mkdir()
+        with patch.object(ud,"ROOT",self.folder),patch.object(ud,"_download") as network:
+            path,source=ud._archive(cache,self.spec,False)
+            self.assertEqual(source,"user/imports");self.assertEqual(path.read_bytes(),self.data)
+            self.assertEqual(local.read_bytes(),self.data);network.assert_not_called()
+    def test_invalid_local_archive_is_rejected_without_network(self):
+        inbox=self.folder/"user/imports";inbox.mkdir(parents=True);(inbox/self.spec["name"]).write_bytes(b"wrong")
+        with patch.object(ud,"ROOT",self.folder),patch.object(ud,"_download") as network:
+            with self.assertRaisesRegex(ValueError,"does not match"):ud._archive(self.folder,self.spec,False)
+            network.assert_not_called()
+    def test_room_consent_can_download_missing_archive(self):
+        with patch.object(ud,"ROOT",self.folder),patch.object(ud,"_download",return_value=self.folder/self.spec["name"]) as network:
+            path,source=ud._archive(self.folder,self.spec,True)
+            self.assertEqual(source,"github");network.assert_called_once()
+
     def test_two_downloads_cannot_promote_at_once(self):
         with ud._lock(self.folder):
             with self.assertRaises(ValueError):

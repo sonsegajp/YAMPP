@@ -175,7 +175,7 @@ if (Test-Path -LiteralPath $backup) {
 
 # Remember the disc and lay down the folders the game writes to.
 $user = Join-Path $root 'user'
-foreach ($folder in @('saves', 'mods\music\stage', 'cache')) {
+foreach ($folder in @('saves', 'mods\music\stage', 'imports', 'cache')) {
     $null = New-Item -ItemType Directory -Force -Path (Join-Path $user $folder)
 }
 $discXml = New-Object System.Xml.XmlDocument

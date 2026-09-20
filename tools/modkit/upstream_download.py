@@ -8,6 +8,7 @@ from contextlib import contextmanager
 import hashlib
 import json
 import os
+import shutil
 from pathlib import Path
 import sys
 import tempfile
@@ -129,7 +130,30 @@ def plan(value):
             "runtimeSupported": False, "files": [{"name": build[key]["name"], "size": build[key]["size"]} for key in ("archive", "project")]}
 
 
-def acquire(value, *, confirmed=False, progress=None):
+def _archive(folder, spec, allow_download, progress=None):
+    cached=folder/spec["name"]
+    if _verified(cached,spec):return cached,"cache"
+    inbox=ROOT/"user/imports"
+    for part in (inbox,*inbox.parents):
+        if part.exists():_ordinary(part)
+        if part==ROOT.resolve():break
+    local=inbox/spec["name"]
+    if local.exists():
+        if not _verified(local,spec):raise ValueError("The Akaneia archive in user/imports does not match the supported official release")
+        fd,name=tempfile.mkstemp(prefix=".import-",suffix=".part",dir=folder);os.close(fd);temporary=Path(name)
+        try:
+            shutil.copyfile(local,temporary)
+            if not _verified(temporary,spec):raise ValueError("The Akaneia import changed during copying")
+            if cached.exists():_ordinary(cached)
+            temporary.replace(cached)
+        finally:temporary.unlink(missing_ok=True)
+        return cached,"user/imports"
+    if not allow_download:
+        raise ValueError("Put "+spec["name"]+" in user/imports, then install again")
+    return _download(folder,spec,progress),"github"
+
+
+def acquire(value, *, confirmed=False, progress=None, allow_download=True):
     build = release(value)
     if confirmed is not True: raise ValueError("Confirm the GitHub download before acquiring Akaneia")
     root = _directory()
@@ -137,11 +161,11 @@ def acquire(value, *, confirmed=False, progress=None):
     if folder.exists(): _ordinary(folder)
     folder.mkdir(exist_ok=True)
     with _lock(folder):
-        archive = _download(folder, build["archive"], progress)
+        archive, archive_source = _archive(folder, build["archive"], allow_download, progress)
         project = _download(folder, build["project"], progress)
-        result = {**identity(build), "downloaded": True, "runtimeSupported": False,
+        result = {**identity(build), "downloaded": archive_source=="github", "archiveSource": archive_source, "runtimeSupported": False,
                   "archivePath": str(archive), "projectPath": str(project),
-                  "message": "Akaneia downloaded from GitHub. Play support is not ready in this build."}
+                  "message": "Akaneia source verified. Preparing local content."}
         path = folder / "download.json"
         if path.exists(): _ordinary(path)
         fd, name = tempfile.mkstemp(prefix=".receipt-", dir=folder)

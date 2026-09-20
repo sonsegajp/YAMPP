@@ -48,3 +48,5 @@ Captured with `scripts/check_online_native_ui.py` using isolated cards, settings
 - [Saria's Song label](saria-label-20260920.png): actual Great Bay alternate-track banner, September 20.
 
 - Corrected Akaneia stage imports: [Dedede / Boxing Ring arena](akaneia-boxing-20260920.png) and [Village](akaneia-village-20260920.png), actual native matches on September 20.
+
+- [Folder-first Akaneia preparation](akaneia-local-import-20260920.png): preview 2, using a separately acquired official archive. Akaneia itself is not included with YAMPP.

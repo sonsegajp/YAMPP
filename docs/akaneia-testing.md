@@ -1,6 +1,6 @@
 # Selective Akaneia test build
 
-Open `Run-YAMPP-Test.cmd` from this checkout. `Run-Managed-Test.cmd` and `Run-Akaneia-Test.cmd` select the same build. On Windows, the application, window, graphics device and controller connections stay open while the selected content reloads. Local settings and additive costumes are preserved. This is a development build, not a new distributable release.
+Install the current Windows preview with **Play YAMPP.cmd** and follow the [Akaneia installation guide](akaneia-install.md). For a prepared development checkout, `python scripts/open_managed_test.py --hot-reload` opens the isolated managed test. On Windows, content reload preserves the application window, graphics device, controller connections, local settings and additive costumes.
 
 ## Content and consent
 

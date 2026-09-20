@@ -8,7 +8,7 @@ Supply your own **NTSC-U 1.02 / GALE01 revision 2** disc image. This source tree
 
 ## Play
 
-**[Download the Windows preview](https://github.com/sonsegajp/YAMPP/releases/latest)** and extract the entire ZIP. The distribution starts with **Play YAMPP.cmd** and follows the original opening FMV to the title screen; A/Start skips the movie. **Setup.cmd** selects and validates your disc. **Melee Workshop.cmd** opens the editor. In the current development checkout, **Run-YAMPP-Test.cmd** opens the isolated YAMPP test build; the existing `Run-Melee.cmd` launcher is retained separately. See [setup and building](docs/building.md).
+**[Download the Windows preview](https://github.com/sonsegajp/YAMPP/releases/latest)** and extract the entire ZIP. The distribution starts with **Play YAMPP.cmd** and follows the original opening FMV to the title screen; A/Start skips the movie. **Setup.cmd** selects and validates your disc. **Melee Workshop.cmd** opens the editor. Source checkouts retain only the normal **Run-Melee.cmd** and **Run-Workshop.cmd** launchers; test utilities are under `scripts/`. See [setup and building](docs/building.md).
 
 Keyboard defaults: WASD = main stick, X = A, Z = B, C/V = X/Y, Enter = Start, Q/E = L/R, Shift = Z, IJKL = C-stick, arrow keys = D-pad. SDL gamepads are supported. F1 opens PC settings.
 
@@ -23,7 +23,27 @@ Keyboard defaults: WASD = main stick, X = A, Z = B, C/V = X/Y, Enter = Start, Q/
 
 Start with the [modding guide](docs/modding.md): additive costumes and their artwork, fighter clones and Lua, stage imports, validation and Workshop publishing. [Custom music](docs/custom-music.md) documents folders, decoding and limits. [How YAMPP works](docs/architecture.md) explains the decompilation basis, native runtime, rendering, rollback and content isolation.
 
-See the [actual UI screenshots](docs/screenshots/README.md) for the Online menus and aspect-ratio options.
+## Screenshots
+
+Actual in-game Options and Online screens. More aspect ratios, dialogs and C-stick views are in the [UI gallery](docs/screenshots/README.md).
+
+| Online rooms | Two-player lobby |
+| --- | --- |
+| ![Online room browser](docs/screenshots/room-browser-tester-r2.png) | ![Online lobby](docs/screenshots/room-lobby-16x9.png) |
+| **Widescreen options** | **Controller option** |
+| ![4:3 and 16:9 options](docs/screenshots/aspect-options-16x9.png) | ![Controller option on the original panel](docs/screenshots/controller-hover-20260919.png) |
+| **Mod Browser** | **Profile** |
+| ![Mod Browser](docs/screenshots/mod-browser-16x9.png) | ![Local Profile editor](docs/screenshots/profile-20260919.png) |
+
+## Akaneia compatibility
+
+YAMPP supports the official **Akaneia 1.0.1** fighters, stages and music. **Akaneia is not included in YAMPP, this repository, or our server.** Download the official archive yourself, place it in `user/imports`, then install through Mod Browser. Follow the [step-by-step Akaneia installation guide](docs/akaneia-install.md). Room joins can separately offer a confirmed download directly from official GitHub.
+
+These are compatibility screenshots of locally installed third-party content:
+
+| Dedede / Boxing Ring arena | Village |
+| --- | --- |
+| ![Akaneia arena running in YAMPP](docs/screenshots/akaneia-boxing-20260920.png) | ![Akaneia Village running in YAMPP](docs/screenshots/akaneia-village-20260920.png) |
 
 Source and build dependencies are credited in [CREDITS.md](CREDITS.md). Their licenses remain attached to their source and are collected with local distributions. The project is unofficial and is not affiliated with Nintendo.
 

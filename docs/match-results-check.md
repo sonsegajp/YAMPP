@@ -25,4 +25,4 @@ Logs, reports, audio and actual Aurora GPU frames go in `build/comparisons/match
 
 The corresponding `transition-contact.jpg` files contain the visual review captures. The fixed executable SHA256 is `2f53a10168e81dff3f1afe46af3dde3affdb0a753c97656cce2054aa2270706a`.
 
-Use `Run-Melee-Test.cmd` for the fixed development build with normal live controls. The launcher validates XML-derived assets against the user's ISO and does not enable diagnostic input replay.
+Use the current prepared distribution through `Play YAMPP.cmd` for normal live controls. The launcher validates XML-derived assets against the user's ISO and does not enable diagnostic input replay.

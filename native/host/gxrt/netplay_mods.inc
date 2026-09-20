@@ -349,6 +349,7 @@ static int nm_spawn(int job, const char* hash, int enabled) {
     wchar_t wide_hash[65]; for (unsigned i = 0; i <= 64; ++i) wide_hash[i] = (unsigned char)hash[i];
     _snwprintf(extra, 160, job == NM_TOGGLE ? L" --sha256 %ls --enabled %d" : job == NM_UPSTREAM_DOWNLOAD ? L" --sha256 %ls --confirm" : L" --sha256 %ls", wide_hash, enabled);
   }
+  if (job == NM_UPSTREAM_DOWNLOAD && nm.pending_join > 0) wcscat(extra, L" --room-join");
   if (job == NM_ROOM_INSTALL) {
     char csv[600]; wchar_t wide_csv[600];
     if (!nm_hash_text(nm.required, nm.count, csv, sizeof csv)) return 0;
@@ -425,7 +426,10 @@ static int nm_spawn(int job, const char* hash, int enabled) {
     } else if (hash) {
       if (!nm_hash_valid(hash)) return 0;
       args[count++] = "--sha256"; args[count++] = (char*)hash;
-      if (job == NM_UPSTREAM_DOWNLOAD) args[count++] = "--confirm";
+      if (job == NM_UPSTREAM_DOWNLOAD) {
+        args[count++] = "--confirm";
+        if (nm.pending_join > 0) args[count++] = "--room-join";
+      }
       if (job == NM_TOGGLE) {
         snprintf(enabled_text, sizeof enabled_text, "%d", enabled);
         args[count++] = "--enabled"; args[count++] = enabled_text;
@@ -782,8 +786,8 @@ static int nm_command(int cmd, int arg, const char* text, const NetplayRules* ru
       if (!nm_spawn(NM_TOGGLE, mod.sha256, !mod.enabled)) nm_fail("Could not update the costume setting.");
     } else {
       nm.count = 1; nm.required[0] = mod; nm.pending_join = 0;
-      lock(); np.ui.mod_prompt = !strcmp(mod.id,"akaneia") ? 3 : 2; np.ui.mod_required_count = 1; np.ui.mod_required[0] = mod; unlock();
-      nm_status(!strcmp(mod.id,"akaneia")?"Install fighters, stages and music from official GitHub?":"Download this costume pack?");
+      lock(); np.ui.mod_prompt = !strcmp(mod.id,"akaneia") ? 3 : 2; np.ui.mod_pending_room = 0; np.ui.mod_required_count = 1; np.ui.mod_required[0] = mod; unlock();
+      nm_status(!strcmp(mod.id,"akaneia")?"Install Akaneia from the archive in user/imports?":"Download this costume pack?");
     }
     return 1;
   }

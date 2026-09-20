@@ -32,3 +32,5 @@ For a bug, include the screen/stage, fighters/costumes, input device, resolution
 Online and Workshop use the public `mmodx.fun` hostname. Private deployment configuration is excluded. Public source and Windows downloads are available at [YAMPP](https://github.com/sonsegajp/YAMPP).
 
 The current audio update fixes ADPCM header-boundary corruption heard in Akaneia GameCube music. Actual GameCube and Green Hill audio checks pass the targeted waveform/decoder checks; occasional long-load playback gaps remain. See [audio validation](audio-validation.md).
+
+Preview 2 changes initial Akaneia installation to a user-supplied archive in `user/imports`. Confirmed room joins can still acquire a missing archive directly from official GitHub. Follow [the installation guide](akaneia-install.md). The update passed 13 acquisition regressions, a real official-archive import/cache check without an archive download, and the native local-install UI capture.

@@ -88,12 +88,12 @@ def toggle(enabled):
     from upstream_download import BUILDS
     return {"sha256":BUILDS[0]["archive"]["sha256"],"enabled":bool(enabled),"restartRequired":True}
 
-def prepare(confirmed=False):
+def prepare(confirmed=False,allow_download=False):
     """Acquire only from official GitHub, then compose content against the user's ISO."""
     import shutil,subprocess,sys,tempfile
     from upstream_download import acquire,identity,BUILDS,_download,_verified,digest_file
     build=BUILDS[0]
-    result=acquire(identity(build),confirmed=confirmed)
+    result=acquire(identity(build),confirmed=confirmed,allow_download=allow_download)
     # acquire verifies the download; this helper also supplies the native importer.
     result.update(runtimeSupported=True,message="Akaneia content verified. Reloading the menu.")
     if checked_content(read_state().get("akaneia"),True) and stage_files_current(read_state().get("akaneia")):return dict(result,**toggle(True))

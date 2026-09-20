@@ -693,6 +693,7 @@ def main():
     upstream = sub.add_parser("upstream-download")
     upstream.add_argument("--sha256", required=True)
     upstream.add_argument("--confirm", action="store_true")
+    upstream.add_argument("--room-join", action="store_true", help="Allow an archive download after room-join consent")
     upstream.add_argument("--output", type=Path)
     args = parser.parse_args()
     try:
@@ -701,7 +702,7 @@ def main():
             match = next((b for b in BUILDS if b["archive"]["sha256"] == args.sha256), None)
             if match is None: raise ValueError("Unknown upstream release; update YAMPP")
             from content_mods import prepare as prepare_content
-            result = prepare_content(confirmed=args.confirm)
+            result = prepare_content(confirmed=args.confirm,allow_download=args.room_join)
         elif args.command == "list":
             result = catalog()
         elif args.command == "active":

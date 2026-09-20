@@ -539,17 +539,18 @@ void mod_confirmation(Canvas& c,const MeleeNetplayUi& ui,int first) {
     prompt_strip(c,{{"A","Disable & Join"},{"B","Cancel"}});footer(c,ui.mod_status);return;
   }
   if(ui.mod_prompt==3) {
+    const bool joining=ui.mod_pending_room>0;
     c.box(67,110,666,366,IM_COL32(3,8,18,150));
     c.box(106,125,588,290,IM_COL32(7,18,34,248),6);c.border(106,125,588,290,gold,2,6);
     c.text(400,140,27,gold,downloading?"Preparing Akaneia":"Akaneia",548,true,true);
     c.text(400,187,18,white,"Add Akaneia fighters, stages and music.",536,true);
     c.text(400,222,17,gold,"Official GitHub: akaneia/akaneia-build",536,true);
     c.text(400,254,16,white,"Version "+std::string(ui.mod_required[0].version)+"  |  "+download_size(ui.mod_required[0].bytes),536,true);
-    c.paragraph(130,293,16,muted,"Download from GitHub and enable this mod? YAMPP will reload the menu and continue.",535,3,22);
+    c.paragraph(130,293,16,muted,joining?"Download from official GitHub and join? YAMPP will prepare the content and continue.":"Place Akaneia.Builder.1.0.1.7z in user/imports, then install. YAMPP does not bundle Akaneia.",535,3,22);
     c.text(400,379,15,muted,"Your original Melee files stay separate.",536,true);
     prompt_strip(c,downloading?std::initializer_list<Prompt>{{"B","Cancel"}}:
-                                   std::initializer_list<Prompt>{{"A","Download"},{"B","Cancel"}});
-    footer(c,downloading?"Preparing the official GitHub release...":"Download Akaneia from its official GitHub release?");
+                                   std::initializer_list<Prompt>{{"A",joining?"Download":"Install"},{"B","Cancel"}});
+    footer(c,downloading?"Preparing verified Akaneia content...":joining?"Download Akaneia from official GitHub?":"Install the official archive from user/imports.");
     return;
   }
   for(int i=0;i<count;i++) bytes+=std::max(0,ui.mod_required[i].bytes);
