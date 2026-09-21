@@ -112,7 +112,11 @@ def _download(folder, spec, progress=None):
                 count += len(chunk)
                 if count > spec["size"]: raise ValueError("GitHub release exceeds its pinned size")
                 digest.update(chunk); output.write(chunk)
-                if progress: progress(count, spec["size"])
+                if progress is not None:
+                    # Accepts either a plain callable or a stage reporter.
+                    report = getattr(progress, "within", None)
+                    if report: report("download", count, spec["size"])
+                    else: progress(count, spec["size"])
             if count != spec["size"] or digest.hexdigest() != spec["sha256"]:
                 raise ValueError("GitHub release verification failed; nothing was installed")
             output.flush(); os.fsync(output.fileno())

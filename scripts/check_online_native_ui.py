@@ -276,7 +276,7 @@ def main():
                 observer = Fixture(port,"Catalog Observer",compatibility=wire_identity); fixtures.append(observer)
                 fixtures.append(Fixture(port,"Practice Partner","Friendly Melee",compatibility=wire_identity))
                 host=Fixture(port,"Practice Partner",compatibility=wire_identity);fixtures.append(host)
-                host.send(op="hello",name="Practice Partner",version=2,sync="rollback-v1",features=["mods-v1","compat-v1"],compatibility=wire_identity)
+                host.send(op="hello",name="Practice Partner",version=2,sync="rollback-v2",features=["mods-v1","compat-v1"],compatibility=wire_identity)
                 required=[entries[0]["sha256"]]
                 host.send(op="create",name="Costume Practice",max=2,required_mods=required,installed_mods=required,rules={"stock":4,"minutes":8,"items":0})
                 deadline=time.monotonic()+10

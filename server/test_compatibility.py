@@ -25,7 +25,7 @@ class CompatibilityTests(unittest.TestCase):
     def client(self, compatibility):
         client = Client(self.server, None, RecordingWriter())
         self.server.clients[client.id] = client
-        self.command(client, "hello", version=2, sync="rollback-v1", compatibility=compatibility,
+        self.command(client, "hello", version=2, sync="rollback-v2", compatibility=compatibility,
                      features=["compat-v1"] if compatibility else [])
         return client
 
@@ -55,7 +55,7 @@ class CompatibilityTests(unittest.TestCase):
         self.assertEqual(guest.writer.messages[-1]["compatibility"], identity())
 
     def test_identity_cannot_be_renegotiated_after_membership(self):
-        self.command(self.host, "hello", version=2, sync="rollback-v1", compatibility=identity(game="4"))
+        self.command(self.host, "hello", version=2, sync="rollback-v2", compatibility=identity(game="4"))
         self.assertEqual(self.host.compatibility, identity())
         self.assertEqual(self.room.compatibility, identity())
         self.assertEqual(self.host.writer.messages[-1]["op"], "error")
@@ -82,7 +82,7 @@ class CompatibilityTests(unittest.TestCase):
     def test_feature_and_fingerprint_must_be_negotiated_together(self):
         for features, value in ((["compat-v1"], None), ([], identity())):
             client = Client(self.server, None, RecordingWriter())
-            self.command(client, "hello", version=2, sync="rollback-v1", features=features, compatibility=value)
+            self.command(client, "hello", version=2, sync="rollback-v2", features=features, compatibility=value)
             self.assertFalse(client.compatible)
             self.assertEqual(client.writer.messages[-1]["op"], "error")
 

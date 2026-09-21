@@ -50,6 +50,27 @@ def plan(runtime):
             "base_dol_key": base_dol_key, "expected_dol_sha1": cfg["identity"]["dolSha1"]}
 
 
+def decoded_disc_identity(path, decoder=None):
+    """Hash the logical disc, not its compression container; no temporary ISO."""
+    import subprocess
+    decoder = Path(decoder) if decoder else ROOT / "bin" / ("YAMPP-disc-identity.exe" if os.name == "nt" else "YAMPP-disc-identity")
+    if not decoder.is_file():
+        decoder = ROOT / "build/native-game" / decoder.name
+    if not decoder.is_file():
+        raise ValueError("Install the ISO/RVZ Online hotfix before joining")
+    options = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+    result = subprocess.run([str(decoder), str(path)], capture_output=True, text=True, timeout=300, **options)
+    if result.returncode:
+        raise ValueError("Compressed disc verification failed: " + result.stderr.strip()[:240])
+    receipt = json.loads(result.stdout)
+    digest, size = receipt.get("sha256"), receipt.get("size")
+    if (receipt.get("schema") != 1 or not isinstance(digest, str) or len(digest) != 64
+            or any(c not in "0123456789abcdef" for c in digest)
+            or type(size) is not int or not 0 < size <= 8 * 1024**3):
+        raise ValueError("Invalid decoded disc identity")
+    return size, bytes.fromhex(digest)
+
+
 def fingerprint(doc):
     if doc.get("schema") != 1 or not isinstance(doc.get("files"), list):
         raise ValueError("Unsupported compatibility plan")
@@ -65,8 +86,11 @@ def fingerprint(doc):
         dol_digest = hashlib.sha1() if record["key"] == doc.get("base_dol_key", "sys/main.dol") else None
         with path.open("rb") as stream:
             before = os.fstat(stream.fileno())
+            compressed_disc = record["key"] == "disc-image" and stream.read(4) in (b"RVZ\x01", b"WIA\x01")
+            stream.seek(0)
             size = 0
             while True:
+                if compressed_disc: break
                 block = stream.read(1024 * 1024)
                 if not block:
                     break
@@ -74,6 +98,8 @@ def fingerprint(doc):
                 if dol_digest:
                     dol_digest.update(block)
                 size += len(block)
+            logical = decoded_disc_identity(path) if compressed_disc else (size, digest.digest())
+            if compressed_disc: size = before.st_size
             after = os.fstat(stream.fileno())
         if size != before.st_size or before.st_size != after.st_size or before.st_mtime_ns != after.st_mtime_ns:
             raise ValueError("A game input changed while it was being verified")
@@ -87,8 +113,8 @@ def fingerprint(doc):
             key = record["key"].encode("utf-8")
             game.update(struct.pack(">I", len(key)))
             game.update(key)
-            game.update(struct.pack(">Q", size))
-            game.update(digest.digest())
+            game.update(struct.pack(">Q", logical[0]))
+            game.update(logical[1])
     if not checked_baseline: raise ValueError("Pinned base executable is missing from the verification plan")
     if runtime_hash is None:
         raise ValueError("Native runtime was not verified")

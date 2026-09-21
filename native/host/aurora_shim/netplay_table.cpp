@@ -411,7 +411,7 @@ void rules_editor(Canvas& c,const MeleeNetplayUi& ui,int selected) {
   c.box(206,117,388,344,IM_COL32(5,12,26,246),8); c.border(206,117,388,344,IM_COL32(183,161,59,255),2,8);
   c.text(400,128,30,gold,"Change Rules",350,true,true);
   const char* labels[]={"Mode","Stock","Time","Items","Input Delay","Return"};
-  const std::string values[]={ui.rules.mode?"Stock":"Time",number(ui.rules.stock),ui.rules.minutes?number(ui.rules.minutes)+" min":"No limit",item_name(ui.rules.items),number(ui.rules.delay)+" frames",""};
+  const std::string values[]={ui.rules.mode?"Stock":"Time",number(ui.rules.stock),ui.rules.minutes?number(ui.rules.minutes)+" min":"No limit",item_name(ui.rules.items),ui.rules.delay?number(ui.rules.delay)+" frames":std::string("Auto"),""};
   for(int i=0;i<6;i++) { float y=169+i*45.f; bool focus=i==selected; if(focus) c.box(220,y-2,360,39,gold,3); c.text(233,y+3,22,focus?ink:white,labels[i],170); if(i<5)c.text(484,y+3,21,focus?ink:gold,values[i],170,true); }
   footer(c,"Left / Right: change. B: back.");
 }
@@ -421,7 +421,7 @@ void lobby(Canvas& c,const MeleeNetplayUi& ui,int selected) {
   int slots=ui.player_count>2?4:2; float width=slots==2?206.f:156.f; float gap=slots==2?30.f:12.f; float start=(800-slots*width-(slots-1)*gap)/2;
   for(int i=0;i<slots;i++) player_card(c,ui,i,start+i*(width+gap),112,width);
   c.polygon({{114,288},{686,288},{695,296},{695,314},{105,314},{105,296}},IM_COL32(4,10,18,230),IM_COL32(166,184,186,255),2);
-  const std::string bands[]={ui.rules.mode?number(ui.rules.stock)+" STOCK":"TIME",ui.rules.minutes?number(ui.rules.minutes)+" MIN":"NO LIMIT",item_name(ui.rules.items),number(ui.rules.delay)+"F DELAY"};
+  const std::string bands[]={ui.rules.mode?number(ui.rules.stock)+" STOCK":"TIME",ui.rules.minutes?number(ui.rules.minutes)+" MIN":"NO LIMIT",item_name(ui.rules.items),ui.rules.delay?number(ui.rules.delay)+"F DELAY":std::string("AUTO DELAY")};
   for(int i=0;i<4;i++) { c.text(180+i*146.f,291,19,white,bands[i],137,true,true); if(i<3)c.line(254+i*146.f,292,241+i*146.f,310,muted,2); }
   c.button(237,326,330,28,ui.is_host?"Start Match":"Waiting for Host",selected==0,ui.is_host&&ui.all_ready&&ui.player_count>=2);
   c.button(245,360,314,26,"Change Rules",selected==1,ui.is_host);

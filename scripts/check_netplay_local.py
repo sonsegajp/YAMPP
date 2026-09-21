@@ -45,6 +45,11 @@ def launch(name, out, port, role, script, frames, capture, input_delay=3, mods=N
         import shutil
         shutil.copy2(TEMPLATE_CARD, out / 'card.raw')
     (out / 'settings.xml').write_text('<?xml version="1.0" encoding="utf-8"?>\n<melee-settings schema="1" width="%d" height="720" renderScale="1" widescreen="%d" fullscreen="0" vsync="0" volume="100" mute="1" showFps="0" />' % (1280 if widescreen else 960, widescreen))
+    if os.environ.get('MELEE_NETPLAY_TEST_STAGE'):
+        env['MELEE_TEST_STAGE'] = os.environ['MELEE_NETPLAY_TEST_STAGE']
+    if os.environ.get('MELEE_NETPLAY_TEST_AUDIO') == '1':
+        env['MELEE_AUDIO_STATS'] = str(out/'audio-stats.csv')
+        env['MELEE_AUDIO_CAPTURE'] = str(out/'audio.pcm')
     if compare_scalar_batch:env['MELEE_MEX_SCALAR_BATCH']='1' if role=='host' else '0'
     if os.environ.get('MELEE_NETPLAY_TEST_COMPARE_RENDER')=='1':env['MELEE_OVERLAP_RENDER']='1' if role=='host' else '0'
     if fast_exit:env['MELEE_TEST_FAST_EXIT']='1'
@@ -127,9 +132,11 @@ def main():
     parser.add_argument('--join-widescreen', type=int, choices=(0,1), default=0)
     parser.add_argument('--expect-aspect-reject', action='store_true', help='Require opposite-aspect clients to be rejected before room entry or gameplay')
     parser.add_argument('--fast-exit', action='store_true', help='Skip known renderer DLL-detach fault after card flush and readback; gameplay checks remain unchanged')
-    parser.add_argument('--input-delay', type=int, choices=range(1, 11), default=3)
+    parser.add_argument('--input-delay', type=int, choices=range(0, 11), default=3,
+                        help='0 lets each peer pick its own delay from the measured round trip')
     parser.add_argument('--relay-delay-ms', type=int, default=0)
     parser.add_argument('--relay-jitter-ms', type=int, default=0)
+    parser.add_argument('--relay-stall-ms', type=int, default=0)
     parser.add_argument('--require-rollback', action='store_true')
     parser.add_argument('--costume-package', help='Package SHA-256 to install only in isolated test folders')
     parser.add_argument('--costume-package-file', type=Path, help='Prepared local ZIP to verify before publication; requires its --costume-package SHA-256')
@@ -147,6 +154,7 @@ def main():
         parser.error('Aspect rejection requires different peer aspect settings')
     if not (0 <= args.relay_delay_ms <= 1000 and 0 <= args.relay_jitter_ms <= 1000):
         parser.error('relay delay and jitter must be between 0 and 1000 ms')
+    if not 0 <= args.relay_stall_ms <= 10000:parser.error('invalid relay stall')
     base = (ROOT / 'build/comparisons').resolve()
     out = (base / args.name).resolve()
     if out == base or base not in out.parents:
@@ -173,13 +181,13 @@ def main():
         if hashlib.sha256(raw).hexdigest()!=args.costume_package:raise ValueError('Candidate package does not match --costume-package SHA-256')
         metadata,_=Repository(repository).publish(raw)
         if metadata['sha256']!=args.costume_package:raise ValueError('Repository returned a different costume package')
-    if args.server and (args.relay_delay_ms or args.relay_jitter_ms or args.costume_package):
+    if args.server and (args.relay_delay_ms or args.relay_jitter_ms or args.relay_stall_ms or args.costume_package):
         parser.error('External checks do not host an impairment proxy or costume repository')
     port = free_port()
     server_log = (out / 'server.log').open('w')
     server = None if args.server else subprocess.Popen([sys.executable, str(ROOT / 'scripts/netplay_test_server.py'),
                                '--port', str(port), '--delay-ms', str(args.relay_delay_ms),
-                               '--jitter-ms', str(args.relay_jitter_ms),'--mods-dir',str(repository)],
+                               '--jitter-ms', str(args.relay_jitter_ms),'--stall-ms',str(args.relay_stall_ms),'--mods-dir',str(repository)],
                               stdout=server_log, stderr=subprocess.STDOUT)
     started = time.perf_counter()
     host = join = None
@@ -235,7 +243,7 @@ def main():
     match_epoch = [e for e in a['epochs'] if e[1].strip() == 'match']
     match_epochs = {int(e[0]) for e in match_epoch}
     match_compared = sum(e in match_epochs for e, f in common)
-    require_rollback = args.require_rollback or bool(args.relay_delay_ms or args.relay_jitter_ms)
+    require_rollback = args.require_rollback or bool(args.relay_delay_ms or args.relay_jitter_ms or args.relay_stall_ms)
     impairment_exercised = 'Injected latency:' in (out / 'server.log').read_text(errors='replace')
     expected_endings = {'Shutdown', 'Opponent left', 'Server ended the session'}
     unexpected_endings = [reason for peer in (a, b) for reason in peer['ended'] if reason not in expected_endings]
@@ -268,9 +276,13 @@ def main():
                         and not a['assertions'] and not b['assertions'] and match_compared >= 20
                         and (not require_rollback or (a['rollback_enabled'] and b['rollback_enabled']
                              and a['rollbacks'] + b['rollbacks'] > 0))
-                        and (not (args.relay_delay_ms or args.relay_jitter_ms) or impairment_exercised))
+                        and (not (args.relay_delay_ms or args.relay_jitter_ms or args.relay_stall_ms) or impairment_exercised))
     report['renderOverlapComparison']=os.environ.get('MELEE_NETPLAY_TEST_COMPARE_RENDER')=='1'
     report['scalarBatchComparison']=args.compare_scalar_batch
+    report['relay_stall_ms']=args.relay_stall_ms
+    if args.relay_stall_ms:
+        report['stall_exercised']='Injected traffic stall:' in (out/'server.log').read_text(errors='replace')
+        report['passed']=report['passed'] and report['stall_exercised']
     if args.require_rematch:
         expected=['character select','stage select','match','results','character select','stage select','match']
         report['rematch']={

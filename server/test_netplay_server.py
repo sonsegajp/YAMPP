@@ -6,6 +6,7 @@ No game process, public server, or third-party dependencies are required.
 import asyncio
 import base64
 import json
+import time
 import unittest
 
 from melee_netplay_server import (
@@ -299,6 +300,10 @@ class TcpProtocolTests(unittest.IsolatedAsyncioTestCase):
         if self.handlers:
             await asyncio.wait_for(asyncio.gather(*tuple(self.handlers)), timeout=3)
         self.loop.set_exception_handler(self.previous_handler)
+        # Dropping out of a live match holds the player's place rather than
+        # ending the session, so a test that disconnects mid-match leaves the
+        # room behind until the reconnect window closes.
+        self.server.expire_holds(time.monotonic() + self.server.hold_seconds + 1)
         self.assertEqual(self.server.clients, {})
         self.assertEqual(self.server.rooms, {})
         self.assertEqual(self.server.sessions, {})
@@ -311,7 +316,7 @@ class TcpProtocolTests(unittest.IsolatedAsyncioTestCase):
             writer.write(b'GET /netplay HTTP/1.1\r\nHost: localhost\r\nUpgrade: melee-netplay\r\nConnection: Upgrade\r\n\r\n')
             response = await asyncio.wait_for(reader.readuntil(b'\r\n\r\n'), 3)
             self.assertTrue(response.startswith(b'HTTP/1.1 101 '))
-        writer.write(b'{"op":"hello","name":"Tester","version":2,"sync":"rollback-v1"}\n')
+        writer.write(b'{"op":"hello","name":"Tester","version":2,"sync":"rollback-v2"}\n')
         welcome = await self.receive(reader, 'welcome')
         await self.receive(reader, 'rooms')
         return reader, writer, welcome['id']

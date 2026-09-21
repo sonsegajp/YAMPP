@@ -34,3 +34,19 @@ The selective importer brings over seven added fighters, 17 versus arenas, seven
 See [compatibility screenshots and checks](akaneia-testing.md) and [credits](../CREDITS.md).
 
 ![Akaneia preparation screen with local archive instructions](screenshots/akaneia-local-import-20260920.png)
+
+## Import failure recovery
+
+Updated importer builds use shared read-only access to the original ISO, so
+installation can run from the game while the disc is in use. Local archives
+and verified cached archives are accepted after preparation; neither requires
+a new GitHub download. The importer checks for at least 6 GB free before
+preparation; 8 GB remains the recommended working allowance.
+
+A failed attempt retains `prepare.log` under
+`build/akaneia-content/import-*` and removes its disposable files. Successful
+preparation retains the installed content and log while removing temporary
+copies. The original archive in `user/imports` is retained. Attempts made with
+older releases may still occupy space in their earlier import directories.
+Disk-space errors now have a specific message instead of being reported as
+GitHub verification failures.

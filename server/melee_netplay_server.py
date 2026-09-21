@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Melee PC master server: room lobby and input relay over one TCP connection.
+"""Melee PC master server: room lobby and input relay.
 
 Run on a VPS with Python 3.8+ and no other dependencies:
 
@@ -8,10 +8,25 @@ Run on a VPS with Python 3.8+ and no other dependencies:
 Clients speak newline-delimited JSON. A connection that opens with an HTTP
 request is answered with a 101 upgrade and then speaks the same protocol, so
 the server can sit behind nginx on a port that is already open rather than
-needing one of its own. Match traffic rides the same connection, so players
-need no port forwarding and the server needs no UDP.
+needing one of its own. Match traffic can ride that same connection, so a
+player behind any NAT can always get a game.
+
+Riding the stream is the fallback, not the goal. TCP delivers in order, which
+means one lost segment holds back every input queued behind it until the
+retransmission lands -- a freeze followed by a burst of rollbacks, on a link
+that never actually stopped working. Rollback input does not need ordering:
+every packet names the frames it carries and repeats the previous few. So the
+server also relays those packets over UDP when it can (--udp-port, on by
+default). Clients register by sending a token they were issued over the
+stream; the address the datagram arrives from is where their traffic is sent,
+which keeps NAT mappings working without any port forwarding. A client that
+never gets a datagram through simply stays on the stream.
+
+Losing the stream mid-match no longer ends the game either: the player's slot
+in the session is held (--hold-seconds) while they reconnect and ask to
+resume, and the other players see a pause rather than a disconnect.
 """
-import argparse, asyncio, base64, hashlib, hmac, json, logging, os, random, struct
+import argparse, asyncio, base64, hashlib, hmac, json, logging, os, random, secrets, struct, time
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -27,7 +42,15 @@ MAX_LINE_BYTES = 8192
 MAX_WRITE_BUFFER = 256 * 1024
 PKT_BYE = 2
 PROTOCOL_VERSION = 2
-SYNC_ENGINE = "rollback-v1"
+# Bumped from rollback-v1: input packets now carry the sender's frame
+# advantage, which the peers use to keep their clocks together.
+SYNC_ENGINE = "rollback-v2"
+UDP_TOKEN_CHARS = 32
+# The stream is framed; a datagram is not, so it carries the token in front.
+UDP_MIN_BYTES = UDP_TOKEN_CHARS + HEADER.size + 1
+UDP_MAX_BYTES = UDP_TOKEN_CHARS + MAX_PACKET_BYTES
+DEFAULT_HOLD_SECONDS = 40
+UDP_PACKETS_PER_SECOND = 1000
 UPGRADE = (b"HTTP/1.1 101 Switching Protocols\r\n"
            b"Upgrade: melee-netplay\r\nConnection: Upgrade\r\n\r\n")
 log = logging.getLogger("melee-netplay")
@@ -47,6 +70,30 @@ class Client:
         self.compatibility = None
         self.upstream_build = None
         self.profile = Profile()
+        # Issued over the stream, presented on every datagram. The address a
+        # token arrives from is the only thing that tells us where to send
+        # this client's match traffic, and it may change at any time.
+        self.udp_token = secrets.token_hex(UDP_TOKEN_CHARS // 2)
+        self.udp_addr = None
+        self.udp_window = 0.0
+        self.udp_in_window = 0
+        # Round trip this client last measured to this server. Input is
+        # relayed through here, so the two clients' values are the two halves
+        # of the path their inputs actually take to each other.
+        self.rtt_ms = None
+
+    def datagram_allowed(self, now):
+        """Rate cap for the connectionless path.
+
+        The stream path is bounded by the client's own write buffer; a
+        datagram has no such back pressure, so the budget is explicit. A match
+        sends about one packet a frame plus resends, so the cap is an order of
+        magnitude above anything a real client produces.
+        """
+        if now - self.udp_window >= 1.0:
+            self.udp_window, self.udp_in_window = now, 0
+        self.udp_in_window += 1
+        return self.udp_in_window <= UDP_PACKETS_PER_SECOND
 
     def send(self, message):
         if self.writer.is_closing():
@@ -71,6 +118,10 @@ class Room:
         self.compatibility = host.compatibility
         self.upstream_build = host.upstream_build
         self.session = 0
+        # Slots kept open for players whose connection dropped mid-match. Keyed
+        # by port; each value is the deadline and the state needed to seat the
+        # same player again without disturbing the others.
+        self.holds = {}
         # Detailed costume lists stay on the HTTP API; lobby lines must fit the
         # native client's 64 KiB receive buffer even for multi-pack rooms.
         fields = ("sha256", "id", "name", "version", "kind", "base", "additive", "size", "download_path")
@@ -90,7 +141,43 @@ class Room:
             p.send({"op": "room", "room": self.detail()})
 
 
-DEFAULT_RULES = {"mode": 1, "stock": 4, "minutes": 8, "items": 0, "delay": 3, "pause": 1, "damage": 100, "friendly_fire": 0}
+# delay 0 in the room rules means automatic; the concrete number is resolved
+# here, once, and sent to both clients in the same start message. It has to be
+# one number: a match seeds the frames before the delay as known-empty input
+# on every port, so two clients disagreeing about where that boundary is would
+# contradict each other on the first frame someone held a direction.
+DEFAULT_RULES = {"mode": 1, "stock": 4, "minutes": 8, "items": 0, "delay": 0, "pause": 1, "damage": 100, "friendly_fire": 0}
+
+
+FRAME_MS = 16.683          # one 60 Hz frame, the GameCube's actual 59.94
+MIN_AUTO_DELAY = 1
+MAX_AUTO_DELAY = 6
+
+
+def automatic_delay(players):
+    """Frames of input delay that cover the one-way trip between two players.
+
+    Their inputs travel client -> server -> client, so the one-way time is
+    half of one client's round trip to us plus half of the other's. Rollback
+    absorbs the jitter on top of this, so the delay only has to cover the
+    steady state; anything larger is latency the players feel for nothing.
+
+    A player who has not reported a measurement yet contributes the median of
+    those who have, or the default when nobody has.
+    """
+    measured = [p.rtt_ms for p in players if p.rtt_ms is not None]
+    if not measured:
+        return 3
+    measured.sort()
+    fallback = measured[len(measured) // 2]
+    one_way = sum((p.rtt_ms if p.rtt_ms is not None else fallback) / 2 for p in players)
+    # Two players is the ordinary case; with more, the pair that is furthest
+    # apart is the one the delay has to cover.
+    if len(players) > 2:
+        halves = sorted((p.rtt_ms if p.rtt_ms is not None else fallback) / 2 for p in players)
+        one_way = halves[-1] + halves[-2]
+    frames = int(-(-one_way // FRAME_MS))
+    return max(MIN_AUTO_DELAY, min(MAX_AUTO_DELAY, frames))
 
 
 def clean_rules(rules):
@@ -106,7 +193,7 @@ def clean_rules(rules):
     out["stock"] = min(99, max(1, out["stock"]))
     out["minutes"] = min(99, max(0, out["minutes"]))
     out["items"] = min(5, max(0, out["items"]))
-    out["delay"] = min(10, max(1, out["delay"]))
+    out["delay"] = min(10, max(0, out["delay"]))
     out["damage"] = min(200, max(50, out["damage"]))
     out["pause"] = 1 if out["pause"] else 0
     out["friendly_fire"] = 1 if out["friendly_fire"] else 0
@@ -149,6 +236,12 @@ class Server:
         self.clients = {}
         self.rooms = {}
         self.sessions = {}    # session -> room
+        self.by_token = {}    # udp token -> client
+        self.udp = None       # DatagramTransport once the side channel is up
+        self.udp_port = 0     # advertised to clients; 0 disables the channel
+        self.hold_seconds = DEFAULT_HOLD_SECONDS
+        # Lets a co-located practice peer ask which build the players are on.
+        self.admin_token = os.environ.get("MELEE_NETPLAY_ADMIN_TOKEN", "")
 
     def next_id(self):
         while True:
@@ -165,7 +258,12 @@ class Server:
 
     def room_list(self):
         result = {"op": "rooms", "rooms": []}
+        # A room whose players are all inside their reconnect window still
+        # exists and can still be rejoined, but there is nothing there for
+        # anyone else to join, so it is not offered in the lobby.
         for room in self.rooms.values():
+            if not room.players:
+                continue
             summary = room.summary()
             if len(result["rooms"]) >= 32:
                 result["more"] = True
@@ -188,9 +286,94 @@ class Server:
             return
         self.sessions.pop(room.session, None)
         room.session = 0
+        room.holds.clear()
         for player in room.players:
             player.ready = False
             player.send({"op": "ended", "reason": reason})
+
+    def expire_holds(self, now=None):
+        """Give up on players whose reconnect window has run out."""
+        now = time.monotonic() if now is None else now
+        for room in list(self.rooms.values()):
+            expired = [port for port, hold in room.holds.items() if hold["until"] <= now]
+            for port in expired:
+                room.holds.pop(port, None)
+                log.info("room %d: held slot %d expired", room.id, port + 1)
+            if expired and room.session:
+                self.end_session(room, "A player did not come back")
+                if room.players and room.host not in room.players:
+                    room.host = room.players[0]
+                for i, player in enumerate(room.players):
+                    player.port = i
+                room.broadcast()
+                self.broadcast_rooms()
+            if not room.players and not room.holds:
+                self.rooms.pop(room.id, None)
+
+    def hold_slot(self, client):
+        """Keep a disconnected player's place in a live match.
+
+        A dropped TCP connection and a player walking away look identical from
+        here, and the difference matters enormously to the other player: one
+        deserves a few seconds of held match, the other does not deserve to
+        have the game silently continue. Holding is the recoverable reading,
+        and it is bounded, so being wrong costs a short pause and nothing
+        else. The session, its id and everyone else's state are untouched.
+        """
+        room = client.room
+        if room is None or not room.session:
+            return False
+        room.holds[client.port] = {
+            "until": time.monotonic() + self.hold_seconds,
+            "name": client.name,
+            "compatibility": client.compatibility,
+            "upstream_build": client.upstream_build,
+            "installed_mods": client.installed_mods,
+            "features": client.features,
+            # A deployment may run without profile sharing, so the hold keeps
+            # whatever optional per-client state exists rather than assuming it.
+            "profile": getattr(client, "profile", None),
+            "old_id": client.id,
+        }
+        room.players.remove(client)
+        client.room, client.ready = None, False
+        log.info("room %d: holding slot %d for %s for %ds",
+                 room.id, client.port + 1, client.name, self.hold_seconds)
+        for player in room.players:
+            player.send({"op": "held", "session": room.session, "port": client.port,
+                         "seconds": self.hold_seconds})
+        return True
+
+    def resume_session(self, client, session):
+        """Seat a reconnecting player back in the match they were holding."""
+        self.expire_holds()
+        room = self.sessions.get(session)
+        if room is None or not room.holds:
+            client.send({"op": "resumed", "ok": 0, "message": "That match is no longer running"})
+            return
+        port = next((p for p, hold in room.holds.items()
+                     if hold["name"] == client.name and hold["compatibility"] == client.compatibility), None)
+        if port is None:
+            client.send({"op": "resumed", "ok": 0, "message": "No held place in that match"})
+            return
+        hold = room.holds.pop(port)
+        if client.room is not None:
+            self.leave_room(client)
+        client.room, client.port, client.ready = room, port, True
+        client.installed_mods = hold["installed_mods"]
+        if hold["profile"] is not None:
+            client.profile = hold["profile"]
+        room.players.append(client)
+        room.players.sort(key=lambda pl: pl.port)
+        if room.host not in room.players:
+            room.host = room.players[0]
+        message = {"op": "resumed", "ok": 1, "session": session, "id": client.id, "port": port,
+                   "players": [{"id": pl.id, "port": pl.port} for pl in room.players],
+                   "udp_port": self.udp_port, "udp_token": client.udp_token}
+        for player in room.players:
+            player.send(message)
+        log.info("room %d: %s rejoined session %d on port %d",
+                 room.id, client.name, session, port + 1)
 
     def leave_room(self, client, reason="left"):
         room = client.room
@@ -256,10 +439,16 @@ class Server:
             client.features = set(features)
             client.compatible = True
             client.name = str(message.get("name", "Player"))[:31] or "Player"
+            self.by_token[client.udp_token] = client
             client.send({"op": "welcome", "id": client.id, "version": PROTOCOL_VERSION, "sync": SYNC_ENGINE,
-                         "features": ["compat-v1", "profile-v1", UPSTREAM_FEATURE] + (["mods-v1"] if self.repository else []), "mod_api": self.mod_api})
+                         "features": ["compat-v1", "profile-v1", UPSTREAM_FEATURE] + (["mods-v1"] if self.repository else []),
+                         "mod_api": self.mod_api,
+                         "udp_port": self.udp_port, "udp_token": client.udp_token})
             client.send(self.room_list())
         elif op == "ping":
+            reported = message.get("rtt")
+            if type(reported) is int and 0 <= reported <= 10000:
+                client.rtt_ms = reported
             client.send({"op": "pong"})
         elif op == "list":
             client.send(self.room_list())
@@ -316,7 +505,10 @@ class Server:
                     client.send({"op": "build_required", "room": room.id,
                                  "build": download_offer(room.upstream_build) if room.upstream_build else None})
             elif compatibility_error(client, room):
-                client.send({"op": "error", "code": "compatibility_mismatch", "message": compatibility_error(client, room)})
+                reason = compatibility_error(client, room)
+                log.warning("join rejected client=%d room=%d reason=%s client_compat=%s host_compat=%s",
+                            client.id, room.id, reason, client.compatibility, room.compatibility)
+                client.send({"op": "error", "code": "compatibility_mismatch", "message": reason})
             else:
                 try:
                     installed = clean_hashes(message.get("installed_mods", []))
@@ -364,6 +556,32 @@ class Server:
                         player.ready = False
                     self.broadcast_rooms()
                 room.broadcast()
+        elif op == "peers":
+            # A practice peer cannot invent a game fingerprint: it is a hash
+            # of real bytes it does not have. Rather than guess, it asks what
+            # the players actually connected right now are using, so a room
+            # it puts up is one they can actually join. Restricted to a
+            # shared secret because it reports what builds are in use.
+            token = message.get("token")
+            if not self.admin_token or not isinstance(token, str) or not hmac.compare_digest(token, self.admin_token):
+                client.send({"op": "error", "message": "Not permitted"})
+                return
+            counts = {}
+            for other in self.clients.values():
+                if other is client or not other.compatible or not other.compatibility:
+                    continue
+                key = other.compatibility["fingerprint"]
+                counts[key] = counts.get(key, (0, other.compatibility))
+                counts[key] = (counts[key][0] + 1, other.compatibility)
+            best = max(counts.values(), key=lambda entry: entry[0], default=None)
+            client.send({"op": "peers", "players": sum(n for n, _ in counts.values()),
+                         "compatibility": best[1] if best else None})
+        elif op == "resume":
+            session = message.get("session")
+            if type(session) is not int:
+                client.send({"op": "resumed", "ok": 0, "message": "Invalid session"})
+            else:
+                self.resume_session(client, session)
         elif op == "r":
             self.relay(client, message.get("d", ""))
         elif op == "start":
@@ -380,14 +598,20 @@ class Server:
                 client.send({"op": "error", "message": "Everyone must be ready first"})
             else:
                 room.session = self.next_id()
+                room.holds.clear()
                 self.sessions[room.session] = room
-                start = {"op": "start", "version": PROTOCOL_VERSION, "sync": SYNC_ENGINE, "session": room.session, "seed": random.getrandbits(31) | 1, "delay": room.rules["delay"],
+                # One delay for everyone, resolved here when the room asked
+                # for automatic. `rules` still reports 0 so the lobby keeps
+                # showing Auto; `delay` is what the match runs on.
+                delay = room.rules["delay"] or automatic_delay(room.players)
+                start = {"op": "start", "version": PROTOCOL_VERSION, "sync": SYNC_ENGINE, "session": room.session, "seed": random.getrandbits(31) | 1, "delay": delay,
                          "rules": room.rules, "players": [{"id": p.id, "port": p.port} for p in room.players],
                          "required_mods": room.required_mods, "compatibility": room.compatibility, "upstream_build": room.upstream_build}
                 for p in room.players:
                     p.send(start)
                 self.broadcast_rooms()
-                log.info("session %d started in room %d", room.session, room.id)
+                log.info("session %d started in room %d, delay %d%s", room.session, room.id,
+                         delay, " (automatic)" if not room.rules["delay"] else "")
 
     async def http_json(self, writer, status, value, head=False):
         body = json.dumps(value, separators=(",", ":")).encode()
@@ -553,8 +777,12 @@ class Server:
         except (asyncio.TimeoutError, ConnectionError, asyncio.IncompleteReadError, ValueError):
             pass
         finally:
-            self.leave_room(client, "disconnected")
+            # A drop in the middle of a match holds the slot; anything else is
+            # an ordinary departure.
+            if not self.hold_slot(client):
+                self.leave_room(client, "disconnected")
             self.clients.pop(client.id, None)
+            self.by_token.pop(client.udp_token, None)
             writer.close()
             try:
                 await writer.wait_closed()
@@ -562,14 +790,15 @@ class Server:
                 pass
             log.info("client %d disconnected", client.id)
 
-    def relay(self, client, payload):
-        """Forward one packed input packet to the rest of the session."""
-        if not isinstance(payload, str) or len(payload) > ((MAX_PACKET_BYTES + 2) // 3) * 4:
-            return
-        try:
-            data = base64.b64decode(payload, validate=True)
-        except (ValueError, TypeError):
-            return
+    def forward(self, client, data, payload=None):
+        """Forward one packed input packet to the rest of the session.
+
+        `data` is the decoded packet and `payload` its base64 form when the
+        caller already has one. Delivery is per recipient: whoever has proved
+        a working datagram path gets a datagram, and everyone else gets the
+        stream, so one player behind a UDP-hostile network does not push the
+        other back onto TCP as well.
+        """
         if not HEADER.size < len(data) <= MAX_PACKET_BYTES:
             return
         magic, session, sender, target = HEADER.unpack_from(data)
@@ -580,6 +809,14 @@ class Server:
         for player in room.players:
             if player is client or (target and player.id != target):
                 continue
+            if player.udp_addr is not None and self.udp is not None:
+                try:
+                    self.udp.sendto(data, player.udp_addr)
+                    continue
+                except OSError:
+                    player.udp_addr = None
+            if payload is None:
+                payload = base64.b64encode(data).decode()
             player.send({"op": "r", "d": payload})
         if data[HEADER.size] == PKT_BYE and len(data) == HEADER.size + 2:
             # Returning to menus sends BYE without leaving the lobby. Release
@@ -588,20 +825,110 @@ class Server:
             room.broadcast()
             self.broadcast_rooms()
 
+    def relay(self, client, payload):
+        """One packet that arrived over the stream."""
+        if not isinstance(payload, str) or len(payload) > ((MAX_PACKET_BYTES + 2) // 3) * 4:
+            return
+        try:
+            data = base64.b64decode(payload, validate=True)
+        except (ValueError, TypeError):
+            return
+        self.forward(client, data, payload)
+
+    def relay_datagram(self, datagram, addr):
+        """One packet that arrived over the side channel.
+
+        Nothing here trusts the source address: the token decides who the
+        sender is, and the address is only recorded as the place to answer.
+        That is what lets a client behind a NAT keep playing when its mapping
+        is renumbered mid-match, and what stops a forged source address from
+        redirecting someone else's inputs.
+        """
+        if not UDP_MIN_BYTES <= len(datagram) <= UDP_MAX_BYTES:
+            return
+        token = datagram[:UDP_TOKEN_CHARS].decode("ascii", "replace")
+        client = self.by_token.get(token)
+        if client is None or not client.compatible:
+            return
+        if not client.datagram_allowed(time.monotonic()):
+            return
+        if client.udp_addr != addr:
+            client.udp_addr = addr
+            log.info("client %d reachable by datagram at %s", client.id, addr[0])
+        self.forward(client, datagram[UDP_TOKEN_CHARS:])
+
+
+class UdpRelay(asyncio.DatagramProtocol):
+    """The unreliable half of the relay. Loss is the normal case, not an error."""
+
+    def __init__(self, server):
+        self.server = server
+
+    def connection_made(self, transport):
+        self.server.udp = transport
+
+    def datagram_received(self, data, addr):
+        try:
+            self.server.relay_datagram(data, addr)
+        except Exception:                      # one bad packet must not stop the relay
+            log.exception("dropping malformed datagram from %s", addr[0])
+
+    def error_received(self, exc):
+        # An ICMP rejection for one recipient says nothing about the others.
+        pass
+
+
+async def sweep_holds(server, period=5):
+    """Retire reconnect windows that have run out."""
+    while True:
+        await asyncio.sleep(period)
+        try:
+            server.expire_holds()
+        except Exception:
+            log.exception("hold sweep failed")
+
 
 async def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--port", type=int, default=7420)
     parser.add_argument("--bind", default="0.0.0.0")
+    parser.add_argument("--udp-port", type=int, default=-1,
+                        help="port for the unreliable input relay (default: --port; 0 disables it)")
+    parser.add_argument("--advertise-udp-port", type=int, default=0,
+                        help="port clients should send datagrams to, when it differs from --udp-port "
+                             "because of a firewall or port forward")
+    parser.add_argument("--hold-seconds", type=int, default=DEFAULT_HOLD_SECONDS,
+                        help="how long a disconnected player's place in a live match is kept")
     parser.add_argument("--mods-dir", default=str(Path(__file__).resolve().parent / "packages"))
     parser.add_argument("--mod-api", default="https://mmodx.fun/melee/api")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
     server = Server(Repository(args.mods_dir), args.mod_api)
+    server.hold_seconds = max(0, min(300, args.hold_seconds))
+    udp_port = args.port if args.udp_port < 0 else args.udp_port
+    udp = None
+    if udp_port:
+        loop = asyncio.get_running_loop()
+        try:
+            udp, _ = await loop.create_datagram_endpoint(lambda: UdpRelay(server),
+                                                         local_addr=(args.bind, udp_port))
+            server.udp_port = args.advertise_udp_port or udp_port
+            log.info("input relay also listening on %s:%d (udp, advertised as %d)",
+                     args.bind, udp_port, server.udp_port)
+        except OSError as exc:
+            # The stream path is complete on its own; say so and carry on.
+            log.warning("no datagram relay on port %d (%s); inputs will use the stream only",
+                        udp_port, exc)
     tcp = await asyncio.start_server(server.serve_client, args.bind, args.port, limit=MAX_LINE_BYTES)
     log.info("Melee PC netplay server listening on %s:%d (tcp)", args.bind, args.port)
-    async with tcp:
-        await tcp.serve_forever()
+    sweeper = asyncio.ensure_future(sweep_holds(server))
+    try:
+        async with tcp:
+            await tcp.serve_forever()
+    finally:
+        sweeper.cancel()
+        if udp is not None:
+            udp.close()
 
 
 if __name__ == "__main__":

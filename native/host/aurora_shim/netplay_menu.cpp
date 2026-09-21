@@ -1,8 +1,13 @@
 // In-match netplay status overlay. The lobby, room browser and rules are drawn
 // by the game itself as original Melee menus (native/host/gxrt/hooks.c); the
-// only thing left here is a corner readout the original art has no room for:
-// the input delay, a warning while the game waits for the other player, and a
-// desync notice.
+// only thing left here is a corner readout the original art has no room for.
+//
+// It answers the two questions a player actually has when something feels
+// wrong: what the link is doing, and whether the match is about to end. A
+// held match says so and counts down, because a frozen screen with no
+// explanation is what makes an interruption feel like a crash; a desync says
+// the games have diverged and that play continues, because the match is
+// still playable and stopping it is the players' call.
 #include "aurora_shim.h"
 #include "profile.h"
 #include <imgui.h>
@@ -69,8 +74,23 @@ extern "C" AUSHIM_API void aushim_netplay_menu() {
   ImGui::Begin("Online status", nullptr,
                ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
                ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing);
-  ImGui::TextColored(ImVec4(.68f, .91f, .43f, 1), "ONLINE   delay %d", ui->delay);
-  if (ui->stalled_ms > 250) ImGui::TextColored(ImVec4(1, .8f, .3f, 1), "Waiting for the other player (%.1fs)", ui->stalled_ms / 1000.f);
-  if (ui->desynced) ImGui::TextColored(ImVec4(1, .4f, .4f, 1), "Desync detected: this match no longer matches your opponent's");
+  const ImVec4 good(.68f, .91f, .43f, 1), warn(1, .8f, .3f, 1), bad(1, .4f, .4f, 1), dim(.72f, .77f, .85f, 1);
+  ImGui::TextColored(good, "ONLINE   delay %d%s", ui->delay, ui->rules.delay ? "" : " auto");
+  if (ui->ping_ms >= 0)
+    ImGui::TextColored(dim, "%d ms   %s", ui->ping_ms, ui->udp_active ? "direct" : "relayed");
+  else
+    ImGui::TextColored(dim, "measuring link   %s", ui->udp_active ? "direct" : "relayed");
+  if (ui->interrupted) {
+    // A countdown, not a spinner: the player can see whether to wait.
+    const float left = (ui->interrupt_limit_ms - ui->interrupt_ms) / 1000.f;
+    ImGui::TextColored(warn, "%s", ui->interrupt_text[0] ? ui->interrupt_text : "Waiting for opponent");
+    ImGui::TextColored(warn, "Holding the match - %.0fs left", left < 0 ? 0.f : left);
+  } else if (ui->stalled_ms > 250) {
+    ImGui::TextColored(warn, "Waiting for the other player (%.1fs)", ui->stalled_ms / 1000.f);
+  }
+  if (ui->desynced)
+    ImGui::TextColored(bad, "Desync: the two games have diverged. Play continues.");
+  if (ui->clock_skips || ui->frame_advantage)
+    ImGui::TextColored(dim, "clock %+d   held %d", ui->frame_advantage, ui->clock_skips);
   ImGui::End();
 }

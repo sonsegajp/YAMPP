@@ -213,7 +213,8 @@ RvzImage* rvz_open(const char* path) {
     if (!image) { fclose(f); fail("out of memory"); return NULL; }
     image->file = f;
     image->is_rvz = magic == RVZ_MAGIC;
-    image->disc_size = be64(head1 + 0x20);
+    /* WIAHeader1: four u32 fields, then the 20-byte header-2 SHA-1. */
+    image->disc_size = be64(head1 + 0x24);
     image->compression = be32(head2 + 4);
     image->chunk_size = be32(head2 + 12);
     image->chunk_group = UINT64_MAX;

@@ -661,7 +661,12 @@ static void netplay_description(unsigned kind, unsigned row, char* out, unsigned
     snprintf(out, cap, "Items: %s", names[ui.rules.items % 6]);
     return;
   }
-  case 4: snprintf(out, cap, "Input delay: %d frames", ui.rules.delay); return;
+  case 4:
+    /* 0 is not "no delay": it hands the choice to the clients, which measure
+     * the round trip to each other and cover it exactly. */
+    if (ui.rules.delay) snprintf(out, cap, "Input delay: %d frames", ui.rules.delay);
+    else snprintf(out, cap, "Input delay: automatic, from the measured connection");
+    return;
   case 5: snprintf(out, cap, "%s", ui.all_ready ? "Start the match." : "Waiting for every player to be ready."); return;
   default: snprintf(out, cap, "Leave this room."); return;
   }
@@ -1202,7 +1207,7 @@ static void netplay_screen_think(Context* ctx, uint32_t buttons) {
         else if (room_rule_cursor == 1) { edited_rules.stock += step; if (edited_rules.stock < 1) edited_rules.stock = 1; if (edited_rules.stock > 99) edited_rules.stock = 99; }
         else if (room_rule_cursor == 2) { edited_rules.minutes += step; if (edited_rules.minutes < 0) edited_rules.minutes = 0; if (edited_rules.minutes > 99) edited_rules.minutes = 99; }
         else if (room_rule_cursor == 3) edited_rules.items = (edited_rules.items + step + 6) % 6;
-        else if (room_rule_cursor == 4) { edited_rules.delay += step; if (edited_rules.delay < 1) edited_rules.delay = 1; if (edited_rules.delay > 10) edited_rules.delay = 10; }
+        else if (room_rule_cursor == 4) { edited_rules.delay += step; if (edited_rules.delay < 0) edited_rules.delay = 0; if (edited_rules.delay > 10) edited_rules.delay = 10; }
         if (room_rule_cursor < 5) { rules_dirty = 1; call_guest(ctx, FN_SFX, 2, 0, 0); }
       }
     } else if (buttons & (MENU_INPUT_UP | MENU_INPUT_DOWN)) {

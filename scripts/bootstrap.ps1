@@ -21,3 +21,8 @@ foreach ($spec in $projectXml.'melee-project'.dependencies.dependency) {
 # Preserve the two reviewed compiler fixes on the exact pinned HSDLib sources.
 python (Join-Path $projectRoot "scripts/patch_hsdlib.py")
 if ($LASTEXITCODE) { throw "HSDLib source patch failed; preserve local changes and inspect the reported files." }
+
+if (Test-Path (Join-Path $projectRoot "upstream/MexManager/mexLib/MexWorkspace.cs")) {
+    python (Join-Path $projectRoot "scripts/patch_mex_disc.py")
+    if ($LASTEXITCODE) { throw "m-ex disc patch failed; preserve local changes and inspect the reported files." }
+}

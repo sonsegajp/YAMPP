@@ -9,16 +9,21 @@
 #include <stdint.h>
 #include "../aurora_shim/aurora_shim.h"
 #include "../netplay_ui.h"
+#include "pad_latch.h"
 
 static HMODULE s_dll = NULL;
 static int (*p_poll_pad)(uint32_t, AushimPadStatus*) = NULL;
 static int (*p_quit)(void) = NULL;
 static SRWLOCK s_pad_lock = SRWLOCK_INIT;
 static AushimPadStatus s_pads[4];
+static PadLatch s_pad_latches[4];
 static void refresh_pads(void) {
     if (!p_poll_pad) return;
     AcquireSRWLockExclusive(&s_pad_lock);
-    for (unsigned i=0; i<4; ++i) p_poll_pad(i,&s_pads[i]);
+    for (unsigned i=0; i<4; ++i) {
+        p_poll_pad(i,&s_pads[i]);
+        pad_latch_update(&s_pad_latches[i], &s_pads[i]);
+    }
     ReleaseSRWLockExclusive(&s_pad_lock);
 }
 int aurora_link_get_pad(unsigned port, AushimPadStatus* pad) {
@@ -27,6 +32,26 @@ int aurora_link_get_pad(unsigned port, AushimPadStatus* pad) {
     *pad=s_pads[port];
     ReleaseSRWLockShared(&s_pad_lock);
     return 1;
+}
+int aurora_link_consume_pad(unsigned port, AushimPadStatus* pad) {
+    if (port>=4 || !p_poll_pad) return 0;
+    AcquireSRWLockExclusive(&s_pad_lock);
+    *pad=pad_latch_consume(&s_pad_latches[port]);
+    ReleaseSRWLockExclusive(&s_pad_lock);
+    return 1;
+}
+void aurora_link_clear_pad_events(void) {
+    AcquireSRWLockExclusive(&s_pad_lock);
+    /* A new synchronized scene starts from live controller state; latched
+     * edges and trigger peaks from the previous one are not its input. */
+    for(unsigned i=0;i<4;i++) { s_pad_latches[i].pressed=0; s_pad_latches[i].lt=0; s_pad_latches[i].rt=0; }
+    ReleaseSRWLockExclusive(&s_pad_lock);
+}
+void aurora_link_audio_reset(void) {
+    if(s_dll) {
+        void (*reset)(void)=(void(*)(void))GetProcAddress(s_dll,"aushim_audio_reset");
+        if(reset) reset();
+    }
 }
 int aurora_link_quit_requested(void) { return p_quit && p_quit(); }
 

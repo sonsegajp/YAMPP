@@ -1,5 +1,6 @@
 // Controller mapping and live diagnostics. SDL/PAD access stays on the render thread.
 #include "controllers.h"
+#include "trigger_shape.h"
 #include <SDL3/SDL.h>
 #include <dolphin/pad.h>
 #include <algorithm>
@@ -21,6 +22,14 @@ constexpr const char* names[22]={"A","B","X","Y","Start / Pause","Z","L click","
 constexpr int default_keys[22]={SDL_SCANCODE_X,SDL_SCANCODE_Z,SDL_SCANCODE_C,SDL_SCANCODE_V,SDL_SCANCODE_RETURN,SDL_SCANCODE_LSHIFT,SDL_SCANCODE_Q,SDL_SCANCODE_E,SDL_SCANCODE_UP,SDL_SCANCODE_DOWN,SDL_SCANCODE_LEFT,SDL_SCANCODE_RIGHT,SDL_SCANCODE_D,SDL_SCANCODE_A,SDL_SCANCODE_W,SDL_SCANCODE_S,SDL_SCANCODE_L,SDL_SCANCODE_J,SDL_SCANCODE_I,SDL_SCANCODE_K,SDL_SCANCODE_Q,SDL_SCANCODE_E};
 std::array<std::array<int,22>,4> keys;
 std::array<bool,4> tap_jump{true,true,true,true};
+
+/* Per-port trigger settings. The shaping itself lives in trigger_shape.h,
+ * which is free of SDL and the renderer so it can be tested directly; the
+ * reasoning for it is documented there. */
+using TriggerOptions=YamppTriggerOptions;
+constexpr int CLICK_MIN=YAMPP_CLICK_MIN,CLICK_MAX=YAMPP_CLICK_MAX,DEAD_MAX=YAMPP_DEAD_MAX;
+constexpr TriggerOptions trigger_defaults YAMPP_TRIGGER_DEFAULTS;
+std::array<TriggerOptions,4> trigger_options{trigger_defaults,trigger_defaults,trigger_defaults,trigger_defaults};
 std::atomic<bool> requested{false},back{false},capture{false},menu_capture{false};
 bool opened=false,release_gate=true,bind_armed=false;
 ControllerMenuView view{};
@@ -48,7 +57,13 @@ void apply_keys(unsigned port) {
 bool save_keys() {
  std::error_code ec;std::filesystem::create_directories(key_path.parent_path(),ec);
  auto temp=key_path;temp += ".tmp";
- {std::ofstream f(temp,std::ios::trunc);if(!f)return false;f<<"YAMPP_KEYS 2\n";for(unsigned p=0;p<4;p++){for(int k:keys[p])f<<k<<' ';f<<tap_jump[p]<<'\n';}f.flush();if(!f)return false;}
+ {std::ofstream f(temp,std::ios::trunc);if(!f)return false;f<<"YAMPP_KEYS 3\n";
+  for(unsigned p=0;p<4;p++){
+   for(int k:keys[p])f<<k<<' ';
+   const TriggerOptions& t=trigger_options[p];
+   f<<tap_jump[p]<<' '<<t.click<<' '<<t.point<<' '<<t.light<<' '<<t.dead<<'\n';
+  }
+  f.flush();if(!f)return false;}
 #ifdef _WIN32
  return MoveFileExW(temp.c_str(),key_path.c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH)!=0;
 #else
@@ -61,7 +76,7 @@ void fill_view() {
  view.tap_jump=tap_jump[view.port];
  const char* name=PADGetName(view.port);if(name&&!*name)name=nullptr;view.connected=name!=nullptr;
  view.device=view.keyboard?"Keyboard":name?name:"No controller connected";
- view.count=view.keyboard?26:31;
+ view.count=view.keyboard?26:33;
  for(int i=0;i<view.count;i++){view.labels[i].clear();view.values[i].clear();}
  view.labels[0]="Device";view.values[0]=view.device;
  u32 bn=0,an=0;auto* bm=PADGetButtonMappings(view.port,&bn);auto* am=PADGetAxisMappings(view.port,&an);
@@ -74,34 +89,48 @@ void fill_view() {
  if(view.keyboard){view.labels[23]="Restore default keys";view.labels[24]="Tap jump";view.values[24]=tap_jump[view.port]?"On":"Off";view.labels[25]="Test inputs";}
  else {
   auto* dz=PADGetDeadZones(view.port);
+  const TriggerOptions& t=trigger_options[view.port];
   view.labels[23]="Main dead zone";view.labels[24]="C-stick deadzone";
-  view.labels[25]="Trigger clicks";view.labels[26]="Click threshold";
-  view.labels[27]="Test rumble";view.labels[28]="Restore mapping";view.labels[29]="Tap jump";view.values[29]=tap_jump[view.port]?"On":"Off";view.labels[30]="Test inputs";
-  if(dz){view.values[23]=std::to_string(dz->useDeadzones?int(dz->stickDeadZone)*100/32767:0)+"%";view.values[24]=std::to_string(dz->useDeadzones?int(dz->substickDeadZone)*100/32767:0)+"%";view.values[25]=dz->emulateTriggers?"Emulated":"Physical";view.values[26]=std::to_string(int(dz->leftTriggerActivationZone)*100/32767)+"%";}
+  /* The trigger rows sit together and are named for what they do in the
+   * game, not for the plumbing: "L / R click" is the air dodge and wave dash
+   * input, and the live bars on the left of this screen show where the
+   * player's own trigger actually reaches while they set it. */
+  view.labels[25]="L / R click";view.values[25]=t.click?"Analog press":"Physical only";
+  view.labels[26]="Click point";
+  view.values[26]=t.click?std::to_string(t.point)+"%":"Physical";
+  view.labels[27]="Light shield";view.values[27]=t.light?"On":"Off";
+  view.labels[28]="Trigger dead zone";view.values[28]=std::to_string(t.dead)+"%";
+  view.labels[29]="Test rumble";view.labels[30]="Restore mapping";
+  view.labels[31]="Tap jump";view.values[31]=tap_jump[view.port]?"On":"Off";
+  view.labels[32]="Test inputs";
+  if(dz){view.values[23]=std::to_string(dz->useDeadzones?int(dz->stickDeadZone)*100/32767:0)+"%";view.values[24]=std::to_string(dz->useDeadzones?int(dz->substickDeadZone)*100/32767:0)+"%";}
  }
  view.row=std::clamp(view.row,0,view.count-1);view.first=std::clamp(view.row-3,0,std::max(0,view.count-8));
 }
 void adjust(int direction) {
  if(view.row==0){if(view.keyboard)return;int n=(int)PADCount();if(n){int next=(PADGetIndexForPort(view.port)+direction+n)%n;PADSetPortForIndex(next,view.port);view.message="Controller assigned to port "+std::to_string(view.port+1)+".";}return;}
- if(view.row==(view.keyboard?24:29)){tap_jump[view.port]=!tap_jump[view.port];saved();return;}
+ if(view.row==(view.keyboard?24:31)){tap_jump[view.port]=!tap_jump[view.port];saved();return;}
  if(view.keyboard)return;
+ TriggerOptions& t=trigger_options[view.port];
+ if(view.row==25){t.click=!t.click;saved();return;}
+ if(view.row==26){if(!t.click)return;t.point=std::clamp(t.point+direction*5,CLICK_MIN,CLICK_MAX);saved();return;}
+ if(view.row==27){t.light=!t.light;saved();return;}
+ if(view.row==28){t.dead=std::clamp(t.dead+direction*2,0,DEAD_MAX);saved();return;}
  auto* d=PADGetDeadZones(view.port);if(!d)return;
  if(view.row==23||view.row==24){auto& v=view.row==23?d->stickDeadZone:d->substickDeadZone;v=(u16)std::clamp(int(v)+direction*655,0,13107);d->useDeadzones=true;}
- else if(view.row==25)d->emulateTriggers=!d->emulateTriggers;
- else if(view.row==26){d->leftTriggerActivationZone=(u16)std::clamp(int(d->leftTriggerActivationZone)+direction*1638,3276,32767);d->rightTriggerActivationZone=d->leftTriggerActivationZone;}
  else return;
  saved();
 }
 void accept() {
  if(view.row==0){adjust(1);return;}
  if(view.row<=22){if(!view.keyboard&&!device()){view.message="Connect a controller before mapping.";return;}view.binding=view.row;bind_armed=false;capture=true;bind_deadline=SDL_GetTicks()+15000;view.message="Release controls, then press the new input.";return;}
- if((view.keyboard&&view.row==23)||(!view.keyboard&&view.row==28)){
+ if((view.keyboard&&view.row==23)||(!view.keyboard&&view.row==30)){
   if(view.keyboard){for(int i=0;i<22;i++)keys[view.port][i]=view.port==0?default_keys[i]:-1;apply_keys(view.port);}
-  else PADRestoreDefaultMapping(view.port);
+  else {PADRestoreDefaultMapping(view.port);trigger_options[view.port]=trigger_defaults;}
   saved();return;
  }
  if(view.row==view.count-1){view.live_test=1;view.message="Move sticks and press buttons.";release_gate=true;return;}
- if(!view.keyboard&&view.row==27){if(auto* g=device())SDL_RumbleGamepad(g,0x6000,0x6000,400);view.message="Rumble test: 0.4 seconds.";return;}
+ if(!view.keyboard&&view.row==29){if(auto* g=device())SDL_RumbleGamepad(g,0x6000,0x6000,400);view.message="Rumble test: 0.4 seconds.";return;}
  adjust(1);
 }
 unsigned navigation(const PADStatus* pads) {
@@ -132,13 +161,20 @@ extern "C" void aushim_controllers_init() {
  for(auto& p:keys)p.fill(-1);for(int i=0;i<22;i++)keys[0][i]=default_keys[i];
  const char* settings=std::getenv("MELEE_SETTINGS");key_path=std::filesystem::u8path(settings&&*settings?settings:"user/settings.xml").parent_path()/"controller-keyboard-v1.txt";
  std::ifstream f(key_path);std::string tag;int version=0;auto candidate=keys;
- if(f>>tag>>version&&tag=="YAMPP_KEYS"&&(version==1||version==2)){
-  bool valid=true;auto jump=tap_jump;
+ if(f>>tag>>version&&tag=="YAMPP_KEYS"&&version>=1&&version<=3){
+  bool valid=true;auto jump=tap_jump;auto conditioning=trigger_options;
   for(unsigned p=0;p<4;p++){
    for(int& k:candidate[p])if(!(f>>k)||k<-1||k>=SDL_SCANCODE_COUNT)valid=false;
-   if(version==2){int value=-1;if(!(f>>value)||(value!=0&&value!=1))valid=false;else jump[p]=value!=0;}
+   if(version>=2){int value=-1;if(!(f>>value)||(value!=0&&value!=1))valid=false;else jump[p]=value!=0;}
+   if(version>=3){
+    TriggerOptions& t=conditioning[p];
+    if(!(f>>t.click>>t.point>>t.light>>t.dead))valid=false;
+    else if(t.click<0||t.click>1||t.light<0||t.light>1
+            ||t.point<CLICK_MIN||t.point>CLICK_MAX||t.dead<0||t.dead>DEAD_MAX)valid=false;
+   }
   }
-  std::string extra;if(f>>extra)valid=false;if(valid){keys=candidate;tap_jump=jump;}
+  std::string extra;if(f>>extra)valid=false;
+  if(valid){keys=candidate;tap_jump=jump;trigger_options=conditioning;}
  }
  for(unsigned p=0;p<4;p++)apply_keys(p);
 }
@@ -153,6 +189,23 @@ extern "C" void aushim_controller_keyboard_fallback(unsigned port,AushimPadStatu
  if(x)s->stick_x=(int8_t)(x*127);if(y)s->stick_y=(int8_t)(y*127);if(cx)s->cstick_x=(int8_t)(cx*127);if(cy)s->cstick_y=(int8_t)(cy*127);
  if(key_down(keys[port][20]))s->trigger_left=255;if(key_down(keys[port][21]))s->trigger_right=255;s->error=0;
 }
+extern "C" void aushim_controller_triggers(unsigned port,AushimPadStatus* s){
+ if(port>=4||!s)return;
+ const TriggerOptions& t=trigger_options[port];
+ /* One authority for the click. The renderer's own emulation is switched off
+  * so that the click point is the only thing that decides, and so that it
+  * cannot separately force the analog value to full and take light shielding
+  * away. A physically mapped shoulder button is untouched by either. */
+ if(auto* deadzones=PADGetDeadZones(port))deadzones->emulateTriggers=false;
+ struct Side { uint8_t* analog; uint16_t bit; };
+ const Side sides[2]={{&s->trigger_left,PAD_TRIGGER_L},{&s->trigger_right,PAD_TRIGGER_R}};
+ for(const Side& side:sides){
+  int click=0;
+  *side.analog=yampp_trigger_shape(&t,*side.analog,(s->buttons&side.bit)!=0,&click);
+  if(click)s->buttons|=side.bit;
+ }
+}
+
 extern "C" void aushim_controllers_update(){
  bool want=requested.load();if(want!=opened){opened=want;view={};view.binding=0;view.message="Select an input to remap.";release_gate=true;prior=0;capture=false;menu_capture=want;opened_at=SDL_GetTicks();}
  if(!opened||back.load())return;
@@ -161,6 +214,7 @@ extern "C" void aushim_controllers_update(){
  PADStatus pads[4]{};PADRead(pads);
  auto& p=pads[view.port];view.pad={p.button,p.stickX,p.stickY,p.substickX,p.substickY,p.triggerLeft,p.triggerRight,p.analogA,p.analogB,p.err,0,0};
  aushim_controller_keyboard_fallback(view.port,&view.pad);
+ aushim_controller_triggers(view.port,&view.pad);
  unsigned nav=navigation(pads);bool esc=key_down(SDL_SCANCODE_ESCAPE);
  if(view.binding){capture_binding(nav);fill_view();return;}
  if(release_gate){if(!nav&&!esc&&SDL_GetTicks()-opened_at>200)release_gate=false;prior=nav;fill_view();return;}

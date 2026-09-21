@@ -702,7 +702,11 @@ def main():
             match = next((b for b in BUILDS if b["archive"]["sha256"] == args.sha256), None)
             if match is None: raise ValueError("Unknown upstream release; update YAMPP")
             from content_mods import prepare as prepare_content
-            result = prepare_content(confirmed=args.confirm,allow_download=args.room_join)
+            from job_progress import Progress, sidecar
+            # The runtime watches this file so the player can see a long
+            # import advancing instead of guessing whether it has hung.
+            result = prepare_content(confirmed=args.confirm,allow_download=args.room_join,
+                                     progress=Progress(sidecar(args.output)))
         elif args.command == "list":
             result = catalog()
         elif args.command == "active":
@@ -725,6 +729,7 @@ def main():
         code = 0
     except Exception as e:
         result = {"error": str(e)}
+        if getattr(e,"ui_code",None):result["uiCode"]=e.ui_code
         code = 1
     encoded = json.dumps(result, ensure_ascii=False, indent=2)
     if args.output:

@@ -13,6 +13,23 @@ This is an experimental Windows preview; see the [public release notes](releases
 - Great Bay's alternate track displays **Saria's Song** in its actual in-game banner.
 - Options > **Controller** replaces Screen Display and uses a flat hover icon on the original animated layered panel. Connect/Disconnect have consistent lowercase c glyphs. Widescreen and Controller art also remain active with Akaneia enabled.
 - Controller mapping shows live buttons, sticks and triggers. **Z** toggles per-port tap jump; save to retain mappings/preferences. Official Nintendo/Mayflash four-port support is implemented, but physical adapter validation is still outstanding. Set Mayflash to Wii U mode.
+- **Trigger settings, per port.** Melee asks for the digital L/R *click* for an
+  air dodge, a wave dash and a hard shield; it never derives that bit from how
+  hard the trigger is squeezed. A GameCube controller has a real microswitch
+  under the travel, but a gamepad whose shoulders are only axes has none, and
+  the renderer used to synthesise one only at 95% of the reported range -- which
+  a pad that never quite reports its maximum can never reach. That is why air
+  dodging appeared to need a crushing press. Four rows now set it:
+  - **L / R click** -- *Analog press* (default) synthesises the click from the
+    analog axis; *Physical only* leaves it to a mapped shoulder button.
+  - **Click point** -- where it engages, default 55%, which is the value Melee
+    already treats as a full shield, so any pad that can hard-shield can also
+    air dodge. Watch the live L/R bars on the left of the screen while setting it.
+  - **Light shield** -- *On* (default) passes the real analog value through, so
+    presses below the click point light-shield exactly as on hardware; *Off*
+    makes any press a full shield.
+  - **Trigger dead zone** -- default 8%, below which a resting trigger reads as
+    untouched.
 - Online > **Profile** supports a typed username and PNG/BMP picture. **X saves**, **Y restores the default controller**, and **B discards edits**. Enter accepts typed text; Escape cancels it. Pictures remain local for this tester build. Reconnect after changing your username to apply it to a public session.
 - Adventure's Underground Maze no longer preloads every additive Link costume for enemies, fixing the reproduced heap assertion/black screen. Maze loading and gameplay pass; a full Adventure clear has not been established.
 - Fierce Deity Link **1.0.3** is a separate Mod Browser download, with four additive slots, brown boots across palettes, matching portraits and stock icons. All four were exercised with Akaneia enabled.

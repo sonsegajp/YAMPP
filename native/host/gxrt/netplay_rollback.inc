@@ -1,6 +1,7 @@
 /* Callable synchronized simulation boundary based on the authoritative original
  * gm_801A4D34 (upstream/melee/src/melee/gm/gm_1A45.c). Native call stacks are
  * never copied or longjmp'ed: each replay invokes a complete returned step. */
+extern void frontend_guest_checkpoint(void);
 extern size_t frontend_audio_snapshot(void*, int);
 extern size_t frontend_io_snapshot(void*, int);
 extern size_t frontend_bus_snapshot(void*, int);
@@ -87,9 +88,13 @@ static void rollback_visibility(Context* ctx) {
   rollback_service=prior_service;
 }
 static void rollback_simulate(Context* ctx, uint32_t on_frame, uint32_t frame) {
+  frontend_guest_checkpoint();
   rollback_step = 1; rollback_progress = 0; g_recomp_poll_budget = 4096;
   rollback_visibility(ctx);
   rollback_diagnose(ctx, "pre", frame);
+  /* DMA playback advances exactly one 60 Hz slice. Guest progress used to
+   * service ARAM waits must not produce extra audio every simulation frame. */
+  rollback_audio_clock = rollback_audio_origin + ((uint64_t)frame + 1) * 675000u;
   rollback_clock += 675000u;
   ctx->timebase = rollback_clock;
   /* Audio and deferred DMA/stream callbacks run at the same frame boundary in
@@ -185,7 +190,7 @@ static int rollback_restore(Context* ctx, uint32_t frame) {
 }
 static void rollback_hashes(Context* ctx, uint32_t frame) {
   rollback_step = 1; rollback_service = 1;
-  uint32_t hash = state_hash(ctx);
+  uint32_t hash = state_hash(ctx, frame);
   rollback_service = 0; rollback_step = 0;
   lock(); np.hashes[frame & 255] = hash; unlock();
 }
@@ -204,21 +209,46 @@ static void rollback_confirm_hashes(void) {
     if (np.frame - f < 256 && np.hashes[f & 255] != np.remote_hash[p] && !np.desynced) {
       InterlockedExchange(&np.desynced, 1); np.ui.desynced = 1;
       fprintf(stderr, "[netplay] DESYNC at epoch %d frame %u: local %08X remote %08X\n", np.epoch, f, np.hashes[f & 255], np.remote_hash[p]);
+      state_trace_dump(f);
     }
   }
   unlock();
 }
+/* Apply a correction, or decline to.
+ *
+ * Declining is a normal outcome, not a failure to end the match over. A
+ * snapshot may have aged out of the window, or a native scheduler change may
+ * make the saved state unsafe to restore. In every one of those cases the
+ * simulation in front of us is still a valid continuation of the game -- it
+ * simply used a prediction that turned out to be wrong, exactly as it would
+ * have with a slightly larger window. Dropping the correction costs the
+ * mispredicted frames and nothing else, so the match plays on and the counter
+ * says how often it happened. */
+static unsigned rollback_declined;
 static int rollback_correct(Context* ctx, uint32_t on_frame) {
   lock(); uint32_t first = rollback.dirty, end = np.frame;
   if (first == RB_NONE || first >= end) { unlock(); return 1; }
   rollback.dirty = RB_NONE; unlock();
-  if (!rollback_restore(ctx, first)) { end_session("Rollback state unavailable or native scheduler changed"); return 0; }
+  if (!rollback_restore(ctx, first)) {
+    if (!rollback_declined++)
+      fprintf(stderr, "[netplay] correction for frame %u declined: snapshot unavailable; play continues\n", first);
+    return 1;
+  }
   rollback_replay = 1;
   uint32_t replayed = 0;
   for (uint32_t f = first; f < end; ++f) {
     rollback_save(ctx, f);
     lock(); int ready = rb_inputs(&rollback, f, rollback_pads); unlock();
-    if (!ready) { rollback_replay = 0; end_session("Rollback correction unavailable"); return 0; }
+    if (!ready) {
+      /* The replay has reached a frame whose inputs are no longer available.
+       * Stop here and keep what has been replayed: np.frame is wound back to
+       * this frame so the forward loop picks up from a consistent state. */
+      rollback_replay = 0;
+      lock(); np.frame = f; np.ui.frame = (int)np.frame; rb_advance(&rollback, np.frame); unlock();
+      ++rollback.rollback_count; rollback.replayed_frames += replayed;
+      fprintf(stderr, "[netplay] correction stopped at frame %u: inputs withdrawn\n", f);
+      return 1;
+    }
     rollback_simulate(ctx, on_frame, f); rollback_hashes(ctx, f);
     ++replayed;
     if (mem_read32(ctx, RB_SCENE + 0xC)) {
@@ -232,6 +262,7 @@ static int rollback_correct(Context* ctx, uint32_t on_frame) {
   return 1;
 }
 static void rollback_render(Context* ctx) {
+  frontend_guest_checkpoint();
   call_guest(ctx, 0x800195D0u, 0);
   call_guest(ctx, 0x8033C898u, 0); /* GXInvalidateVtxCache */
   call_guest(ctx, 0x8033F270u, 0); /* GXInvalidateTexAll */
@@ -274,6 +305,7 @@ void netplay_scene_loop(Context* ctx) {
   extern uint64_t frontend_guest_timebase(void);
   extern void frontend_audio_rebase(uint64_t);
   rollback_clock = frontend_guest_timebase();
+  rollback_audio_origin = rollback_audio_clock = rollback_clock;
   frontend_audio_rebase(rollback_clock);
   lock();
   rollback_running = 1; rollback_hash_sent = 0;
@@ -304,34 +336,64 @@ void netplay_scene_loop(Context* ctx) {
   extern volatile long g_frames_posted;
   long paced = g_frames_posted;
   DWORD exit_wait = 0, exit_sent = 0;
+  rollback_declined = 0;
+  uint32_t clock_skips = 0;
   while (np.active && !np.quit) {
-    if (np.desynced) { end_session("Confirmed simulation mismatch; match stopped"); break; }
-    while (g_frames_posted == paced && np.active && !np.quit) { recomp_poll(ctx); Sleep(1); }
+    while (g_frames_posted == paced && np.active && !np.quit) { frontend_guest_checkpoint(); recomp_poll(ctx); Sleep(1); }
+    if (!np.active || np.quit) break;
     paced = g_frames_posted;
+    /* Give back a frame to the peer that has fallen behind. This is the whole
+     * of the clock correction: one host vsync passes without the simulation
+     * advancing, so the other machine closes the gap by one frame. Spending
+     * them one at a time keeps the correction invisible, where letting the
+     * drift accumulate until every frame waits on the network is not. */
+    if (np.skip_frames > 0) {
+      --np.skip_frames; ++clock_skips;
+      lock(); np.ui.clock_skips = (int)clock_skips; unlock();
+      /* The simulation does not advance, but the frame is still drawn. The
+       * host has posted a vsync either way, and leaving it undrawn presents
+       * whatever happens to be in the buffer rather than the picture that
+       * belongs there -- a correction meant to be invisible would instead
+       * flash. Re-presenting the current state is what makes it invisible. */
+      if (!mem_read32(ctx, RB_SCENE + 0xC)) rollback_render(ctx);
+      continue;
+    }
     if (!rollback_correct(ctx, on_frame)) break;
     rollback_confirm_hashes();
     /* Scene exits must be confirmed before assets and native callers unwind. */
     if (mem_read32(ctx, RB_SCENE + 0xC)) {
       lock(); int settled = rollback.confirmed >= np.frame && rollback.dirty == RB_NONE; unlock();
-      if (settled) break;
+      if (settled) { np_resume(); break; }
       if (!exit_wait) exit_wait = GetTickCount();
       if (GetTickCount() - exit_sent >= 40) {
         send_inputs(np.frame + (uint32_t)np.delay - 1, NP_REDUNDANT);
         exit_sent = GetTickCount();
       }
-      if (GetTickCount() - exit_wait > NP_STALL_TIMEOUT_MS) { end_session("Opponent did not confirm the match result"); break; }
+      { DWORD waited = GetTickCount() - exit_wait;
+        if (waited > NP_STALL_GRACE_MS) { end_session("Opponent did not confirm the match result"); break; }
+        if (waited > NP_STALL_NOTICE_MS) {
+          np_interrupt("Waiting for the opponent to confirm the result");
+          lock(); np.ui.interrupt_ms = (int)np_interrupt_age(); unlock();
+        }
+      }
       recomp_poll(ctx); continue;
     }
     exit_wait = 0;
     uint32_t f = np.frame;
+    /* Sample once per simulation frame, independent of wall-clock pad alarms.
+     * The physical sample is merged into, not substituted for, whatever the
+     * guest pad alarms have already observed this frame: a button pressed and
+     * released between the two clocks exists in exactly one of them, and
+     * taking only the newer reading is how those taps went missing. */
     NetInput local = np.local_merge;
-    /* Sample once per simulation frame, independent of wall-clock pad alarms. */
-    extern int aurora_link_get_pad(unsigned, AushimPadStatus*);
+    extern int aurora_link_consume_pad(unsigned, AushimPadStatus*);
     AushimPadStatus physical = {0};
-    if (aurora_link_get_pad(0, &physical)) {
-      local.buttons |= physical.buttons; local.sx = physical.stick_x; local.sy = physical.stick_y;
+    if (aurora_link_consume_pad(0, &physical)) {
+      local.buttons |= physical.buttons;
+      local.sx = physical.stick_x; local.sy = physical.stick_y;
       local.cx = physical.cstick_x; local.cy = physical.cstick_y;
-      local.lt = physical.trigger_left; local.rt = physical.trigger_right;
+      if (physical.trigger_left > local.lt) local.lt = physical.trigger_left;
+      if (physical.trigger_right > local.rt) local.rt = physical.trigger_right;
     }
     if (np.have_script) scripted_local(&local);
     memset(&np.local_merge, 0, sizeof np.local_merge); np.local_merge_valid = 0;
@@ -340,26 +402,43 @@ void netplay_scene_loop(Context* ctx) {
       store_input(np.local_port, np.epoch, f + (uint32_t)np.delay, &local);
     unlock();
     send_inputs(f + (uint32_t)np.delay, NP_REDUNDANT);
-    DWORD started = GetTickCount();
+    DWORD started = GetTickCount(), last_resend = started;
     for (;;) {
       if (!rollback_correct(ctx, on_frame)) break;
       if (np.frame != f || mem_read32(ctx, RB_SCENE + 0xC)) break;
       lock(); int ready = (rollback_match || rollback.confirmed > f) && rb_inputs(&rollback, f, rollback_pads); unlock();
       if (ready || !np.active || np.quit) break;
-      if (GetTickCount() - started > NP_STALL_TIMEOUT_MS) { end_session("Opponent stopped responding"); break; }
-      lock(); np.ui.stalled_ms = (int)(GetTickCount() - started); unlock();
+      DWORD waiting_now = GetTickCount(), waited = waiting_now - started;
+      /* Held for as long as there is any chance of the link coming back. The
+       * frame, the snapshots and the lobby session are all still here; the
+       * moment an input arrives the match carries on from this same frame. */
+      if (waited > NP_STALL_GRACE_MS) { end_session("Opponent stopped responding"); break; }
+      if(waiting_now-last_resend>=40) {
+        lock(); uint32_t missing=rollback.confirmed; unlock();
+        unsigned char request[5]={PKT_REQUEST}; memcpy(request+1,&missing,4);
+        relay_send(request,sizeof request,0);
+        send_inputs(f+(uint32_t)np.delay,64);
+        last_resend=waiting_now;
+      }
+      if (waited > NP_STALL_NOTICE_MS)
+        np_interrupt(np.resuming ? "Reconnecting to the server" : "Waiting for opponent");
+      lock(); np.ui.stalled_ms = (int)waited; np.ui.interrupt_ms = (int)np_interrupt_age(); unlock();
       recomp_poll(ctx); Sleep(1);
     }
     lock(); np.ui.stalled_ms = 0; unlock();
+    np_resume();
     if (!np.active || np.quit) break;
     if (np.frame != f || mem_read32(ctx, RB_SCENE + 0xC)) continue;
     if (rollback_match) rollback_save(ctx, f);
     rollback_simulate(ctx, on_frame, f); rollback_hashes(ctx, f);
     lock(); np.frame = f + 1; np.ui.frame = (int)np.frame; rb_advance(&rollback, np.frame); unlock();
     rollback_confirm_hashes();
+    netplay_clock_tick();
     if (mem_read32(ctx, RB_SCENE + 0xC) != 2) rollback_render(ctx);
   }
-  fprintf(stderr, "[netplay] rollback totals: corrections=%u replayed=%u\n", rollback.rollback_count, rollback.replayed_frames);
+  frontend_guest_checkpoint();
+  fprintf(stderr, "[netplay] rollback totals: corrections=%u replayed=%u declined=%u clock-skips=%u\n",
+          rollback.rollback_count, rollback.replayed_frames, rollback_declined, clock_skips);
   costume_art_frame_done(ctx);
   lock(); rollback_running = 0; unlock(); rb_destroy(&rollback);
   /* Do not treat the switch back to the host clock as elapsed audio time. */

@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 MINGW = Path('C:/msys64/mingw64/bin')
 FORBIDDEN = {'.iso', '.gcm', '.rvz', '.wia', '.dol', '.hps', '.dat', '.usd', '.raw', '.gxt'}
 RUNTIME = ('SDL3.dll', 'webgpu_dawn.dll', 'libpng16.dll', 'zlib1.dll')
+LF = chr(13) + chr(10)   # the note is read in Notepad on a fresh install
 EXTERNAL = ('libturbojpeg.dll', 'libzstd.dll', 'libgcc_s_seh-1.dll', 'libwinpthread-1.dll', 'libstdc++-6.dll', 'libssl-3-x64.dll', 'libcrypto-3-x64.dll')
 
 
@@ -60,7 +61,12 @@ def audit(out):
         relative = p.relative_to(out)
         # Electron's ICU Unicode tables are runtime data, not a Melee DAT archive.
         runtime_icu = relative.as_posix() == 'workshop/icudtl.dat'
-        if (p.suffix.lower() in FORBIDDEN and not runtime_icu) or any(part.lower() in ('user', 'data', 'mods', 'examples') for part in relative.parts):
+        # The import folder must exist in a fresh install or there is nowhere
+        # to put the Akaneia archive, and a ZIP cannot carry an empty folder.
+        # Its note is the one thing allowed under user/.
+        import_note = relative.as_posix() == 'user/imports/README.txt'
+        if ((p.suffix.lower() in FORBIDDEN and not runtime_icu)
+                or (not import_note and any(part.lower() in ('user', 'data', 'mods', 'examples') for part in relative.parts))):
             raise ValueError('Game/mod/user data in distribution: ' + str(relative))
         if p.name.lower() in ('community.xml', 'online.xml', 'disc.xml', 'disc.path'):
             raise ValueError('Private configuration in distribution: ' + str(relative))
@@ -124,6 +130,8 @@ def main():
         if not source.is_file():
             raise SystemExit('Required build artifact is missing: ' + str(source))
     out.mkdir(parents=True)
+    from build_disc_identity import build as build_disc_identity
+    copy(build_disc_identity(), out/'bin/YAMPP-disc-identity.exe')
     copy(exe, out/'bin/YAMPP.exe')
     if core.is_file():
         copy(core,out/'bin/YAMPP.core.dll')
@@ -173,6 +181,20 @@ def main():
     (out/'config').mkdir(exist_ok=True)
     config.write(out/'config/project.xml', encoding='utf-8', xml_declaration=True)
     copy(ROOT/'config/character-assets.xml', out/'config/character-assets.xml')
+    # A fresh install needs somewhere obvious to drop the Akaneia archive.
+    # Without this the folder does not exist, the importer reports the archive
+    # as missing, and nothing on screen says where it was looked for.
+    (out/'user/imports').mkdir(parents=True, exist_ok=True)
+    (out/'user/imports/README.txt').write_text(LF.join([
+        'Put optional content archives here.', '',
+        'Akaneia: download Akaneia.Builder.1.0.1.7z from the official release at',
+        'https://github.com/akaneia/akaneia-build/releases/tag/1.0.1 and place it in',
+        'this folder, keeping the file name and leaving it compressed. Then open',
+        'Online > Mod Browser, choose Akaneia and confirm Install.', '',
+        'YAMPP does not distribute Akaneia and never mirrors it. Installing applies',
+        'the official patch to your own verified disc in a separate workspace, which',
+        'takes several minutes and needs about 6 GB free.', '',
+    ]), encoding='utf-8')
     check_setup_entrypoint(out)
     entries = audit(out)
     (out/'distribution-manifest.json').write_text(json.dumps({'name':'Yet Another Melee PC Port',

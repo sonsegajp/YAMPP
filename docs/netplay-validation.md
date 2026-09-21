@@ -2,6 +2,36 @@
 
 This public source repository records the checks below; prebuilt release availability is documented in the root README. Tests use isolated native executables and matching renderer DLLs. The existing relay, Workshop repository and validated artwork endpoint are deployed; this is separate from GitHub publication.
 
+## Online stability candidate - 2026-09-20
+
+This is the follow-up candidate for reported delayed audio, held/missed input
+and interrupted matches. It adds fixed simulation audio timing, bounded output
+queueing and scene resets, physical-button edge retention, network-thread-only
+sends, missing-input retries and cooperative shutdown checkpoints. Confirmed
+state mismatch protection remains enabled.
+
+- Two native clients with frequent short inputs, 90 +/-60 ms relay delay and a
+  2-second traffic stall completed a match and results with 79 corrections,
+  23 matching gameplay checkpoints and clean exits.
+- A separate 10,500-host-frame run with 75 +/-35 ms relay delay and a 3-second
+  stall completed results and a second match: 98 matching gameplay checkpoints,
+  including 66 in the second match, 49 corrections and clean exits.
+- Two updated native clients hosted, joined and played through the public TLS
+  relay: 62 matching gameplay checkpoints and clean exits.
+- Observed playback queues in the first two cases stayed below 75 ms and ended
+  below 19 ms. These queue measurements are not measurements of speaker latency
+  or a substitute for a listening/input-feel test on two different computers.
+- Core rollback tests matched independent lockstep simulation across 3,109
+  frames and 1,814 corrections; short-tap/release tests and all 74 server tests
+  passed. Initial stall testing exposed an exit-time hang; the subsequent
+  shutdown checkpoints are included in the passing runs above.
+
+Evidence is retained locally under `build/comparisons/online-battlefield-pressure`,
+`online-rematch-stability` and `online-public-stability`. The final candidate
+also records compact per-frame state and input evidence if a confirmed mismatch
+occurs. The user's original real-world desync is not claimed exhaustively
+resolved by these bounded same-machine tests.
+
 ## Final tester r2 public-hostname build
 
 Final executable `462d648eca41e379dbe952684c445beda1985abaf0b2e93c1173d5355ceee57e` and renderer `11bdb9505a4ada41c6c614264452a50a454f60599acbe2e8f232792bc75aca0f` passed the same 6,500-frame impaired-network tap-jump test after changing the public hostname to mmodx.fun: 68 matching confirmed hashes, 55 gameplay samples, 48 rollback corrections, both exits 0, no detected mismatch/desync/assertion/fault. Evidence: `build/comparisons/tester-r2-final-hostname/report.json`.
@@ -123,3 +153,94 @@ The run exited cleanly with 104 matching state checkpoints, 72 during gameplay, 
 ## Final palette-fix candidate, September 20
 
 The final `YAMPP-palette-final` native pair and rebuilt music-overlay renderer repeated the impaired Akaneia consent/rejoin/rematch route. Both peers exited normally with 104 matching checkpoints (72 gameplay, 40 second-match), 27 rollback corrections, no mismatch/reused epoch labels/fault/assertion, and the same process/window across the joining player's content change. Host rendering overlap was enabled, join overlap disabled, with 45 +/-15 ms relay impairment and one frame input delay. Evidence: `build/comparisons/tester-r4-final-akaneia/report.json`. The remote relay and local-only Profile behavior were unchanged.
+
+
+## Netcode rework: transport, clock agreement and interruptions, September 20
+
+The protocol identifier moved to `rollback-v2` because input packets now carry
+the sender's frame advantage. A v2 input packet is one byte longer than a v1
+one and is rejected outright by a v1 peer, so the two builds must not meet;
+the handshake is what keeps them apart. Clients and the relay have to be
+updated together.
+
+### What the measurements showed
+
+Two isolated native clients through a local relay with 80 ms added latency and
+20 ms jitter, automatic input delay (resolved to **1 frame**, the hardest
+case), 8000 host frames:
+
+- 94 compared match checkpoints, **no hash mismatches**, no detected desync,
+  no reused epoch/frame labels.
+- 22 and 23 rollback corrections; **0 declined corrections**.
+- Clock corrections engaged on both peers (24 and 8 frames given back).
+- Both peers reached the match and ended with expected reasons; no assertions.
+- Evidence: `build/comparisons/np-final-jitter/report.json`.
+
+An earlier run of the same fixture at a fixed 2-frame delay without impairment
+(`build/comparisons/np-v2-d2`) matched 92 checkpoints with no mismatch, and
+the first impaired run (`np-v2-jitter`) matched 83 with 15 and 13 corrections.
+
+`report.json` records `passed: false` for these runs because of the renderer
+DLL-detach fault at process teardown, which `--fast-exit` exists to skip. The
+identical fault signature appears in `build/comparisons/netplay-fd-rollback-v4`
+from September 19, before this work, so it is pre-existing and unrelated; every
+gameplay criterion in these runs passes.
+
+### Clock agreement
+
+`native/host/gxrt/tests/timesync_test.c` runs two peers whose hosts tick at
+60.30 Hz and 59.80 Hz through the same exchange a match uses. Uncorrected,
+half a hertz is about 30 frames of drift a minute -- far past the eight-frame
+rollback window, and felt as constant stutter long before any timeout. The
+correction holds the pair to **2 frames over 60 seconds**, with every
+correction made by the faster peer and none by the slower one, and never both
+at once. The test also pins that a steady link is never corrected, that a new
+scene forgets the drift but keeps the measured link, and that a single
+retransmitted packet cannot move the round-trip estimate.
+
+### Automatic input delay, against the live relay
+
+Delay is resolved once by the relay and sent to both clients, because a match
+seeds the frames before the delay as known-empty input on every port: two
+clients disagreeing about that boundary would contradict each other the first
+time somebody held a direction on frame zero. Measured against the deployed
+public service:
+
+| reported round trips | resolved delay |
+| --- | --- |
+| 4 ms + 4 ms | 1 frame |
+| 42 ms + 58 ms | 3 frames |
+| 180 ms + 220 ms | 6 frames (clamped) |
+| neither reported | 3 frames (fallback) |
+
+### Interruptions
+
+`server/test_netplay_resilience.py` (22 checks) covers the datagram relay and
+the reconnect window: that the token rather than the source address identifies
+a sender, that a renumbered NAT mapping follows the player, that a forged or
+unknown token is ignored, that each recipient gets the path that works for
+them, that an unreachable recipient falls back to the stream, that a flood is
+capped and throttled rather than banned, that a mid-match drop holds the
+player's place instead of ending the session, that the same player is seated
+back on the same port and everyone learns the new client ID, that a stranger
+cannot take a held place, and that leaving on purpose is not held.
+
+### Trigger shaping
+
+`native/host/gxrt/tests/trigger_shape_test.c` pins the air-dodge fix: the
+click is reachable on a pad that only reports 75% of its nominal range (the
+old 95% threshold was not), light shielding survives underneath it, a click
+always produces a full shield, a GameCube controller's analog values are
+passed through unrescaled across the whole range, and no combination of
+settings can produce an out-of-range value.
+
+### Not established by any of this
+
+Two local instances on one machine, and one public two-client session, do not
+establish behaviour over every Internet route, every fighter and stage, or
+sustained play. The datagram relay is implemented and unit-tested but is
+**not enabled on the public service**: nginx cannot proxy datagrams and the
+provider firewall drops the port, so that deployment advertises `udp_port: 0`
+and every client uses the stream. The datagram path's live behaviour is
+therefore exercised only by the local fixture, not in production.
+

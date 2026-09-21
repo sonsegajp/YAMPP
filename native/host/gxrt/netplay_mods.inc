@@ -32,6 +32,7 @@ static struct {
   DWORD started;
   NmInputLock* input_locks;
   int input_lock_count, compat_ready, want_compat, want_list, connect_pending, hello_sent, has_compat;
+  char spawn_reason[160];   /* why the helper could not start, when it could not */
   char fingerprint[65], runtime_hash[65], game_hash[65], aspect_fingerprint[2][65];
   char runtime_file_sha256[65], runtime_identity[2][65];
   int aspect_locked, bound_aspect;
@@ -91,6 +92,13 @@ static int nm_aspect_valid(void) {
 static void nm_release_aspect(void) {
   if (nm.aspect_locked) aurora_link_aspect_lock(0);
   nm.aspect_locked = 0;
+}
+static void nm_fail(const char* text);
+/* Report why the helper could not start, falling back to what the caller was
+ * trying to do when there is nothing more specific to say. */
+static void nm_fail_spawn(const char* fallback) {
+  nm_fail(nm.spawn_reason[0] ? nm.spawn_reason : fallback);
+  nm.spawn_reason[0] = 0;
 }
 static void nm_status(const char* text) {
   lock(); snprintf(np.ui.mod_status, sizeof np.ui.mod_status, "%s", text); unlock();
@@ -333,11 +341,38 @@ static int nm_python_path(wchar_t* python, unsigned capacity) {
   length = SearchPathW(NULL, L"python.exe", NULL, capacity, python, NULL);
   return length > 0 && length < capacity;
 }
+/* Why the worker could not be started, when it could not be.
+ *
+ * Every caller turns a failure here into its own message ("Could not open the
+ * costume library"), which says what did not happen but not why, and the
+ * commonest cause by far is an installation that is missing files -- a
+ * download still extracting when the game was launched, or an incomplete
+ * copy. That is entirely fixable by the player, but only if they are told. */
+static void nm_spawn_missing(const wchar_t* what, const wchar_t* where) {
+  fprintf(stderr, "[netplay-mods] cannot start the helper: %ls not found at %ls\n",
+          what, where ? where : L"(unresolved)");
+  /* Recorded rather than shown here: every caller reports its own failure
+   * afterwards, and a generic "could not start" would otherwise bury the one
+   * detail the player can act on. */
+  snprintf(nm.spawn_reason, sizeof nm.spawn_reason,
+           "Installation is incomplete. Extract the whole download again, then retry.");
+}
 static int nm_spawn(int job, const char* hash, int enabled) {
   wchar_t python[MAX_PATH], script[MAX_PATH], folder[MAX_PATH], log_path[MAX_PATH], command[2048];
-  if (nm.process || !nm_python_path(python, MAX_PATH)
-      || !GetFullPathNameW(job == NM_COMPAT_PLAN || job == NM_COMPAT_HASH ? L"tools\\modkit\\compatibility.py" : L"tools\\modkit\\community.py", MAX_PATH, script, NULL)
-      || !GetFullPathNameW(L"build\\netplay-community", MAX_PATH, folder, NULL)) return 0;
+  nm.spawn_reason[0] = 0;
+  if (nm.process) return 0;
+  if (!nm_python_path(python, MAX_PATH)) { nm_spawn_missing(L"the bundled Python runtime", L"tools\\python"); return 0; }
+  const wchar_t* wanted = job == NM_COMPAT_PLAN || job == NM_COMPAT_HASH ? L"tools\\modkit\\compatibility.py" : L"tools\\modkit\\community.py";
+  if (!GetFullPathNameW(wanted, MAX_PATH, script, NULL)) { nm_spawn_missing(wanted, NULL); return 0; }
+  if (GetFileAttributesW(script) == INVALID_FILE_ATTRIBUTES) { nm_spawn_missing(wanted, script); return 0; }
+  /* The helper imports project_config from the installation's scripts folder;
+   * without it every job dies at import time with nothing the player can read. */
+  { wchar_t support[MAX_PATH];
+    if (GetFullPathNameW(L"scripts\\project_config.py", MAX_PATH, support, NULL)
+        && GetFileAttributesW(support) == INVALID_FILE_ATTRIBUTES) {
+      nm_spawn_missing(L"scripts\\project_config.py", support); return 0;
+    } }
+  if (!GetFullPathNameW(L"build\\netplay-community", MAX_PATH, folder, NULL)) return 0;
   CreateDirectoryW(folder, NULL);
   _snwprintf(nm.output, MAX_PATH, L"%ls\\worker-%lu-%u.json", folder, GetCurrentProcessId(), ++nm.serial);
   _snwprintf(log_path, MAX_PATH, L"%ls\\worker-%lu.log", folder, GetCurrentProcessId());
@@ -458,7 +493,7 @@ static void nm_request_compatibility(void) {
   if (nm.compat_ready) return;
   nm.want_compat = 1;
   if (!nm.process && !nm.activation) {
-    if (!nm_spawn(NM_COMPAT_PLAN, NULL, 0)) nm_fail("Could not verify the native game build.");
+    if (!nm_spawn(NM_COMPAT_PLAN, NULL, 0)) nm_fail_spawn("Could not verify the native game build.");
     else { nm_status("Verifying native build and original game data..."); status("Checking game files..."); }
   }
 }
@@ -518,6 +553,38 @@ static int nm_reload_content(void){
  if(!ok){remove(temp);return 0;}
  nm_status("Applying mods. Returning to the menu...");InterlockedExchange(&content_reload,1);return 1;
 }
+/* What the worker says it is doing, while it is still doing it.
+ *
+ * Preparing Akaneia takes minutes of disc patching, extraction and import. A
+ * caption with a bar frozen at zero is indistinguishable from a hang, and a
+ * player who cannot tell the two apart kills the job -- usually most of the
+ * way through. The worker rewrites a small file beside its output as each
+ * stage begins; this reads whichever version is there. A half-written or
+ * missed update costs nothing because the next one replaces it. */
+static void nm_read_progress(void) {
+  wchar_t path[MAX_PATH + 16];
+  if (!nm.output[0]) return;
+  _snwprintf(path, MAX_PATH + 16, L"%ls.progress", nm.output);
+  FILE* file = _wfopen(path, L"rb");
+  if (!file) return;
+  char text[512];
+  size_t got = fread(text, 1, sizeof text - 1, file);
+  fclose(file);
+  text[got] = 0;
+  if (!got) return;
+  long percent = json_int(text, "percent", -1);
+  char message[160]; json_str(text, "message", message, sizeof message);
+  lock();
+  if (percent >= 0 && percent <= 100) np.ui.mod_progress = (int)percent;
+  if (message[0]) snprintf(np.ui.mod_status, sizeof np.ui.mod_status, "%s", message);
+  unlock();
+}
+static void nm_clear_progress(void) {
+  wchar_t path[MAX_PATH + 16];
+  if (!nm.output[0]) return;
+  _snwprintf(path, MAX_PATH + 16, L"%ls.progress", nm.output);
+  DeleteFileW(path);
+}
 static void nm_poll(void) {
   if (nm.process) {
     DWORD code = 0;
@@ -528,8 +595,11 @@ static void nm_poll(void) {
       return;
     }
     if (worker_state > 0) {
+      /* Only the long content import reports stages; the rest finish before a
+       * bar would mean anything. */
+      if (nm.job == NM_UPSTREAM_DOWNLOAD) nm_read_progress();
       if (nm.job == NM_PREVIEW && GetTickCount() - nm.started > 50000) { nm_close_worker(1); nm_preview_end(-1); }
-      else if (GetTickCount() - nm.started > (nm.job==NM_UPSTREAM_DOWNLOAD?900000u:180000u)) nm_fail(nm.job==NM_UPSTREAM_DOWNLOAD?"GitHub download timed out. Try again.":"Costume request timed out. Try again.");
+      else if (GetTickCount() - nm.started > (nm.job==NM_UPSTREAM_DOWNLOAD?900000u:180000u)) nm_fail(nm.job==NM_UPSTREAM_DOWNLOAD?"Akaneia preparation timed out. See the import log.":"Costume request timed out. Try again.");
       return;
     }
     FILE* file = nm_output_file(); char* json = NULL;
@@ -545,21 +615,27 @@ static void nm_poll(void) {
       if (!nm_lock_inputs(json)) { free(json); nm_fail(nm_lock_failure); return; }
       if (!nm_save_plan(json)) { free(json); nm_fail("Could not prepare game data verification."); return; }
     }
+    nm_clear_progress();
     nm_close_worker(0);
     if (code || !json || json_find(json, "error")) {
       if (nm.job == NM_PREVIEW) { free(json); nm_preview_end(-1); return; }
       if (json) fprintf(stderr, "[netplay-mods] helper failed: %.1000s\n", json);
       const char* failure = nm.job == NM_COMPAT_PLAN || nm.job == NM_COMPAT_HASH
           ? "Could not verify the native build and original game data."
-          : nm.job == NM_UPSTREAM_DOWNLOAD ? "GitHub download failed verification. Try again." : "Could not verify the costume library. Check Workshop.";
+          : nm.job == NM_UPSTREAM_DOWNLOAD ? "Akaneia import failed. Check the archive and import log." : "Could not verify the costume library. Check Workshop.";
       if ((nm.job == NM_CREATE || nm.job == NM_JOIN) && json && strstr(json, "must be published or downloaded"))
         failure = "Publish or disable unverified costume packs.";
+      if (nm.job == NM_UPSTREAM_DOWNLOAD && json) {
+        char reason[32]; json_str(json,"uiCode",reason,sizeof reason);
+        if (!strcmp(reason,"import_space")) failure="Akaneia needs 6 GB free on the YAMPP drive. Free space and retry.";
+        else if (!strcmp(reason,"import_failed")) failure="Akaneia preparation failed. See build/akaneia-content import log.";
+      }
       free(json); nm_fail(failure); return;
     }
     int job = nm.job;
     if (job == NM_COMPAT_PLAN) {
       nm.job = NM_IDLE;
-      if (!nm_spawn(NM_COMPAT_HASH, NULL, 0)) { free(json); nm_fail("Could not verify original game data."); return; }
+      if (!nm_spawn(NM_COMPAT_HASH, NULL, 0)) { free(json); nm_fail_spawn("Could not verify original game data."); return; }
     } else if (job == NM_COMPAT_HASH) {
       if (!nm_read_identity(json)) {
         free(json); nm_fail("Update Online verification tools before connecting."); return;
@@ -574,8 +650,8 @@ static void nm_poll(void) {
       if (nm.aspect_locked) nm_select_aspect();
     } else if (job == NM_UPSTREAM_DOWNLOAD) {
       char hash[65];json_str(json,"sha256",hash,sizeof hash);
-      if (!json_int(json,"downloaded",0) || strcmp(hash,AKANEIA_SHA256)) {
-        free(json);nm_fail("Akaneia download verification failed.");return;
+      if (!json_int(json,"runtimeSupported",0) || strcmp(hash,AKANEIA_SHA256)) {
+        free(json);nm_fail("Akaneia preparation verification failed.");return;
       }
       nm.job=NM_IDLE;
       if(!json_int(json,"restartRequired",0)||!nm_reload_content())nm_fail("Open the current YAMPP launcher to apply Akaneia.");
@@ -631,7 +707,7 @@ static void nm_poll(void) {
   if (nm.want_compat && !nm.process && !nm.activation && !nm.compat_ready) nm_request_compatibility();
   if (nm.want_list && !nm.process && !nm.activation && !nm.awaiting_room && !np.ui.room_id && !np.active && !np.armed) {
     nm.want_list = 0;
-    if (!nm_spawn(NM_LIST, NULL, 0)) nm_fail("Could not open the costume library.");
+    if (!nm_spawn(NM_LIST, NULL, 0)) nm_fail_spawn("Could not open the costume library.");
   }
   if (nm.activation) {
     int ready = costumes_active_ready();
@@ -758,7 +834,7 @@ static int nm_command(int cmd, int arg, const char* text, const NetplayRules* ru
         if (nm.job == NM_COMPAT_PLAN || nm.job == NM_COMPAT_HASH) {
           nm.want_list = 1; lock(); np.ui.mod_catalog_loading = 1; unlock();
         }
-      } else if (!nm_spawn(NM_LIST, NULL, 0)) nm_fail("Could not open the costume library.");
+      } else if (!nm_spawn(NM_LIST, NULL, 0)) nm_fail_spawn("Could not open the costume library.");
     }
     return 1;
   }
@@ -767,23 +843,23 @@ static int nm_command(int cmd, int arg, const char* text, const NetplayRules* ru
     if (nm.process || nm.activation || nm.awaiting_room) return 1;
     if (cmd == NETPLAY_CMD_MOD_CONFIRM) {
       int prompt = np.ui.mod_prompt;
-      if(prompt==4){nm.canceled=0;if(!nm_spawn(NM_TOGGLE,AKANEIA_SHA256,0))nm_fail("Could not switch to original Melee.");return 1;}
+      if(prompt==4){nm.canceled=0;if(!nm_spawn(NM_TOGGLE,AKANEIA_SHA256,0))nm_fail_spawn("Could not switch to original Melee.");return 1;}
       if (prompt == 3) {
         nm.canceled=0;
-        if(!nm_spawn(NM_UPSTREAM_DOWNLOAD,AKANEIA_SHA256,0)) nm_fail("Could not start the GitHub download.");
+        if(!nm_spawn(NM_UPSTREAM_DOWNLOAD,AKANEIA_SHA256,0)) nm_fail_spawn("Could not start the Akaneia importer.");
         return 1;
       }
       if (prompt != 1 && prompt != 2) return 1;
       nm.canceled = 0; nm.index = 0;
       if (prompt == 1 && !nm.count) nm_activate(NM_ROOM_INSTALL, "");
-      else if (!nm_spawn(prompt == 1 ? NM_ROOM_INSTALL : NM_CATALOG_INSTALL, prompt == 1 ? NULL : nm.required[0].sha256, 0)) nm_fail("Could not start the costume download.");
+      else if (!nm_spawn(prompt == 1 ? NM_ROOM_INSTALL : NM_CATALOG_INSTALL, prompt == 1 ? NULL : nm.required[0].sha256, 0)) nm_fail_spawn("Could not start the costume download.");
       return 1;
     }
     if (arg < 0 || arg >= np.ui.mod_catalog_count) return 1;
     NetplayMod mod; lock(); mod = np.ui.mod_catalog[arg]; unlock();
     if (cmd == NETPLAY_CMD_MOD_TOGGLE) {
       if (!mod.installed) return 1;
-      if (!nm_spawn(NM_TOGGLE, mod.sha256, !mod.enabled)) nm_fail("Could not update the costume setting.");
+      if (!nm_spawn(NM_TOGGLE, mod.sha256, !mod.enabled)) nm_fail_spawn("Could not update the costume setting.");
     } else {
       nm.count = 1; nm.required[0] = mod; nm.pending_join = 0;
       lock(); np.ui.mod_prompt = !strcmp(mod.id,"akaneia") ? 3 : 2; np.ui.mod_pending_room = 0; np.ui.mod_required_count = 1; np.ui.mod_required[0] = mod; unlock();
@@ -809,7 +885,7 @@ static int nm_command(int cmd, int arg, const char* text, const NetplayRules* ru
       snprintf(nm.pending_name, sizeof nm.pending_name, "%s", text && *text ? text : "Melee room");
       nm.pending_rules = *rules; rules_clamp(&nm.pending_rules);
     } else nm.pending_join = arg;
-    if (!nm_spawn(cmd == NETPLAY_CMD_CREATE ? NM_CREATE : NM_JOIN, NULL, 0)) nm_fail("Could not verify installed costumes.");
+    if (!nm_spawn(cmd == NETPLAY_CMD_CREATE ? NM_CREATE : NM_JOIN, NULL, 0)) nm_fail_spawn("Could not verify installed costumes.");
     return 1;
   }
   if ((cmd == NETPLAY_CMD_READY || cmd == NETPLAY_CMD_START) && !nm_inputs_unchanged()) {

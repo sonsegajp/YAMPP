@@ -12,7 +12,7 @@ class Peer:
         assert b" 101 " in headers.split(b"\r\n",1)[0],"TLS upgrade failed"
         runtime=hashlib.sha256(b"YAMPP transport probe runtime").digest();game=hashlib.sha256(b"YAMPP transport probe data").digest()
         compatibility={"schema":1,"runtime":runtime.hex(),"game":game.hex(),"fingerprint":hashlib.sha256(b"MeleePC-compatibility-v1\0"+runtime+game).hexdigest()}
-        self.send(op="hello",name=name,version=2,sync="rollback-v1",features=["compat-v1","mods-v1"],compatibility=compatibility)
+        self.send(op="hello",name=name,version=2,sync="rollback-v2",features=["compat-v1","mods-v1"],compatibility=compatibility)
         self.wait("welcome");self.wait("rooms")
     def send(self,**message):self.sock.sendall((json.dumps(message)+"\n").encode())
     def wait(self,op,predicate=lambda x:True):

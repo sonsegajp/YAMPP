@@ -85,3 +85,17 @@ The extracted m-ex stage metadata omitted runtime-loaded dependencies. The selec
 The former local import fails the new audit on `GrBxTt.csv`; the repaired import passes. Older local tester installations can disable and re-enable Akaneia in Mod Manager to rebuild with the corrected importer. New installations use it automatically.
 
 Native two-player matches on the repaired Boxing Ring (Dedede arena, external stage 307) and Village (299) each completed 3,300 host frames with two active fighters, no assertion and no runtime fault. [Arena screenshot](screenshots/akaneia-boxing-20260920.png) and [Village screenshot](screenshots/akaneia-village-20260920.png) show the actual stage output. The user also confirmed the arena works. This is targeted validation, not an exhaustive moveset matrix.
+
+## Packaged import correction - 2026-09-20
+
+The bundled Python and self-contained Windows importer prepared the official
+archive with a system-only PATH and the base ISO held open for shared read-only
+access. Setup extracted all 1,209 original disc files first. The content audit
+passed for 7 fighters, 17 versus stages, 7 target stages, 41 music tracks and
+51 required stage files; base menu bytes and upstream music bytes matched.
+The resulting image SHA-256 remained
+`25a280c09742aea1b0db1a71ac487cf5d655dde8138357ed8bcbf5cb32d129f6`.
+The preserved `user/imports` archive was separately reacquired and the prepared
+content activated without a GitHub archive download. Temporary files were
+removed and the import log retained. Evidence:
+`build/akaneia-import-release-check/full-preparation.json` and `report.json`.

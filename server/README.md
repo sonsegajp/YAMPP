@@ -40,28 +40,81 @@ sudo journalctl -u melee-netplay -n 30 --no-pager
 
 The existing service and nginx route can stay in place. Restarting disconnects
 current sessions. Verify the public HTTP-upgrade route with a version-2 hello;
-its welcome must include `"version":2` and `"sync":"rollback-v1"`.
+its welcome must include `"version":2` and `"sync":"rollback-v2"`.
 If the service fails, restore the named backup and restart it.
+
+### Opening the datagram relay
+
+The server relays input over UDP as well as over the lobby stream, because a
+stream delivers in order and one lost segment holds every input behind it
+until the retransmission lands. `--udp-port` defaults to `--port`; `0` turns
+the channel off and keeps everything on the stream.
+
+nginx cannot proxy this, so the UDP port has to reach the service directly.
+Where the lobby is published through nginx on 443, run the datagram relay on
+its own port and open it in the host firewall as well as the provider's:
+
+```
+sudo ufw allow 7420/udp
+# IONOS and similar providers also need the rule added in the cloud firewall,
+# which drops anything not explicitly allowed regardless of the host firewall.
+```
+
+If the relay cannot bind, the server logs a warning and keeps serving on the
+stream alone. If it binds but players cannot reach it, their clients probe for
+a second, give up and use the stream; nothing is lost but the probes. Use
+`--advertise-udp-port` when clients must send to a different port from the one
+the service binds, for example behind a port forward. Confirm it is working by
+watching for `client N reachable by datagram` in the service log, or by the
+in-match readout on a client showing `direct` rather than `relayed`.
 
 ## Protocol summary
 
-A connection must begin with `{"op":"hello","name":"Player","version":2,"sync":"rollback-v1"}`.
-The welcome and session-start replies repeat `version` and `sync`. Older delay-only
+A connection must begin with `{"op":"hello","name":"Player","version":2,"sync":"rollback-v2"}`.
+The welcome and session-start replies repeat `version` and `sync`. Older
 clients and unknown synchronisation engines are rejected so they cannot enter a
-rollback room. Update the server alongside the game; the client also checks the
-server handshake before enabling the lobby.
+rollback room; `rollback-v2` adds the sender's frame advantage to each input
+packet, which is what lets the two clients keep their clocks together. Update
+the server alongside the game; the client also checks the server handshake
+before enabling the lobby.
 
 - TCP, one JSON object per line: `hello`, `list`, `create`, `join`, `leave`,
-  `ready`, `rules`, `start`, `ping`. The server answers with `welcome`,
-  `rooms`, `room`, `start`, `ended`, `error`, `pong`.
-- Input relay: `{ "op": "r", "d": "<base64>" }` on the same TCP connection.
+  `ready`, `rules`, `start`, `ping`, `resume`. The server answers with
+  `welcome`, `rooms`, `room`, `start`, `held`, `resumed`, `ended`, `error`,
+  `pong`.
+- Input relay: `{ "op": "r", "d": "<base64>" }` on the lobby connection.
   The decoded packet starts with little-endian `<IIHH>`: magic `0x4D4C4E50`,
   session ID, sender ID, recipient ID (zero broadcasts to the other players).
   The server verifies session membership and sender identity before forwarding.
   Decoded packets are limited to 1400 bytes and incoming JSON lines to 8192 bytes.
+- Datagram relay: the same packet, on the UDP port, with the client's 32-character
+  `udp_token` from its `welcome` in front of it. The token decides who the
+  sender is; the source address is only recorded as the place to answer, so a
+  renumbered NAT mapping follows the player and a forged source address cannot
+  redirect anyone's inputs. Each client is capped at 1000 datagrams a second.
+  Delivery is per recipient: whoever has proved a working datagram path gets a
+  datagram and everyone else gets the stream, so one player on a UDP-hostile
+  network does not push the other back onto TCP.
+- `delay: 0` in the room rules means automatic. Clients report their measured
+  round trip to this server with `{"op":"ping","rtt":N}`; inputs travel
+  client -> server -> client, so half of each client's round trip is the trip
+  the delay must cover. The server resolves one number at `start` and sends it
+  to everyone in the same message, as the top-level `delay` field, while
+  `rules.delay` stays 0 so the lobby keeps showing Auto. It must be one
+  number: a match seeds the frames before the delay as known-empty input on
+  every port, so two clients disagreeing about that boundary would contradict
+  each other on the first frame someone held a direction.
+- Losing a connection during a live match **holds** that player's place for
+  `--hold-seconds` (40 by default) instead of ending the session. The other
+  players get `held`; the returning player reconnects, sends
+  `{"op":"resume","session":N}` and is seated back on the same port, and
+  everyone gets `resumed` with the new player list so their relays recognise
+  the new client ID. A held room is not advertised in the lobby while nobody
+  is connected to it. When the window closes the session ends normally.
 - A valid session BYE packet ends the match without removing the room, allowing
-  a rematch. Departing hosts transfer ownership to the next player. A rule
-  change clears all Ready flags; duplicate Start cannot replace a live match.
+  a rematch. Leaving on purpose is not held. Departing hosts transfer ownership
+  to the next player. A rule change clears all Ready flags; duplicate Start
+  cannot replace a live match.
 
 Only the host's rules are used for a match. Both players must run the same
 game build and original game assets. Current clients enforce the
@@ -74,9 +127,10 @@ python -m unittest discover -s server -p "test_*.py" -v
 ```
 
 These checks cover room lifecycle, rematches, malformed input, relay identity,
-ID wraparound, and actual localhost TCP and HTTP-upgrade connections. They do
-not establish gameplay synchronisation; run the game-pair check described in
-[docs/netplay.md](../docs/netplay.md) separately.
+ID wraparound, actual localhost TCP and HTTP-upgrade connections, and
+(`test_netplay_resilience.py`) the datagram relay, the reconnect window and
+the automatic delay. They do not establish gameplay synchronisation; run the
+game-pair check described in [docs/netplay.md](../docs/netplay.md) separately.
 
 ## Optional costume repository
 

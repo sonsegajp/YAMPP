@@ -3,6 +3,7 @@
 #include <assert.h>
 #include "../netplay.c"
 
+int g_mex_active;
 static int test_costume_ready = 1;
 static int test_aspect, test_aspect_locked, test_aspect_unavailable;
 int aurora_link_widescreen(int set,int value){if(set&&!test_aspect_locked)test_aspect=!!value;return test_aspect;}
@@ -198,6 +199,15 @@ int main(int argc, char** argv) {
     assert(np.ui.mod_inspect_ready == -1 && !np.ui.mod_preview_path[0]);
     assert(np.ui.mod_catalog_count == 1 && !strcmp(np.ui.mod_inspect_package, argv[2]));
     puts("Native hidden worker loaded a hash-verified PNG only; preview failure preserved catalog state.");
+  } else if (argc > 1 && !strcmp(argv[1], "--akaneia-local")) {
+    assert(getenv("MELEE_CONTENT_RESTART"));
+    nm_clear(1); nm.canceled=0; nm.pending_join=0;
+    assert(nm_spawn(NM_UPSTREAM_DOWNLOAD, AKANEIA_SHA256, 0));
+    DWORD started=GetTickCount();
+    while(nm.process && GetTickCount()-started<180000) { nm_poll(); Sleep(4); }
+    assert(!nm.process && netplay_content_reload_requested());
+    assert(!strcmp(np.ui.mod_status,"Applying mods. Returning to the menu..."));
+    puts("Verified local Akaneia archive accepted by the native worker; same-window reload requested.");
   } else if (argc > 1) {
     nm_clear(1);
 #ifdef _WIN32

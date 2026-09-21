@@ -185,7 +185,7 @@ class ModRoomTests(unittest.TestCase):
     def client(self, name):
         client = Client(self.server, None, RecordingWriter())
         self.server.clients[client.id] = client
-        self.command(client, "hello", name=name, version=2, sync="rollback-v1", features=["mods-v1"])
+        self.command(client, "hello", name=name, version=2, sync="rollback-v2", features=["mods-v1"])
         return client
 
     def command(self, client, op, **fields):
@@ -233,7 +233,7 @@ class ModRoomTests(unittest.TestCase):
 
     def test_legacy_feature_handshake_cannot_host_or_join_modded_room(self):
         room = self.room()
-        self.command(self.guest, "hello", version=2, sync="rollback-v1", features=[])
+        self.command(self.guest, "hello", version=2, sync="rollback-v2", features=[])
         self.command(self.guest, "join", room=room.id, installed_mods=[self.digest])
         self.assertIsNone(self.guest.room)
         self.assertIn("mods-v1", self.guest.writer.messages[-1]["message"])
@@ -242,7 +242,7 @@ class ModRoomTests(unittest.TestCase):
 
     def test_features_cannot_change_after_join(self):
         room = self.room()
-        self.command(self.host, "hello", version=2, sync="rollback-v1", features=[])
+        self.command(self.host, "hello", version=2, sync="rollback-v2", features=[])
         self.assertIs(self.host.room, room)
         self.assertIn("mods-v1", self.host.features)
         self.assertEqual(self.host.installed_mods, (self.digest,))
@@ -278,7 +278,7 @@ class ModRoomTests(unittest.TestCase):
         self.command(self.host, "start")
         start = self.host.writer.messages[-1]
         self.assertEqual(start["op"], "start")
-        self.assertEqual(start["sync"], "rollback-v1")
+        self.assertEqual(start["sync"], "rollback-v2")
         self.assertEqual(start["required_mods"], room.required_mods)
 
 

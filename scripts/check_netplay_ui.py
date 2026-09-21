@@ -13,7 +13,7 @@ class Fixture:
     def __init__(self, port, name, room=None, follow=False, rules=None, compatibility=None, upstream_build=None):
         self.sock=socket.create_connection(('127.0.0.1',port),5)
         self.sock.settimeout(.2); self.stop=False; self.follow=follow; self.name=name; self.room=0; self.joining=0; self.messages=[]
-        self.send(op='hello',name=name,version=2,sync='rollback-v1',features=(['compat-v1'] if compatibility else [])+(['upstream-builds-v1'] if upstream_build else []),compatibility=compatibility,upstream_build=upstream_build)
+        self.send(op='hello',name=name,version=2,sync='rollback-v2',features=(['compat-v1'] if compatibility else [])+(['upstream-builds-v1'] if upstream_build else []),compatibility=compatibility,upstream_build=upstream_build)
         if room:self.send(op='create',name=room,max=2,rules=rules or {'stock':4,'minutes':8,'items':0})
         self.thread=threading.Thread(target=self.listen,daemon=True); self.thread.start()
     def send(self,**obj):

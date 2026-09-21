@@ -36,7 +36,7 @@ def main():
         raise SystemExit("pass the server address as the second argument, or set MELEE_NETPLAY_SERVER")
     sock, buffer = connect(server)
     print("connected to", server, flush=True)
-    sock.sendall(b'{"op":"hello","name":"Dummy","version":2,"sync":"rollback-v1"}\n')
+    sock.sendall(b'{"op":"hello","name":"Dummy","version":2,"sync":"rollback-v2"}\n')
     sock.sendall(('{"op":"create","name":"%s","max":2}\n' % name).encode())
     sock.sendall(b'{"op":"ready","ready":true}\n')
     last_ping = time.time()

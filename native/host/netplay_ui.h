@@ -6,7 +6,7 @@
 #define MELEE_NETPLAY_UI_H
 #include <stdint.h>
 
-#define NETPLAY_UI_VERSION 6u
+#define NETPLAY_UI_VERSION 7u
 #define NETPLAY_MAX_MODS 16
 #define NETPLAY_MOD_CATALOG 64
 #define NETPLAY_MAX_ROOMS 32
@@ -52,7 +52,7 @@ typedef struct NetplayRules {
   int32_t stock;         /* 1..99 */
   int32_t minutes;       /* 0 = no limit, 1..99 */
   int32_t items;         /* 0 none, 1 very low .. 5 very high */
-  int32_t delay;         /* input delay frames 1..10 */
+  int32_t delay;         /* input delay frames 1..10, or 0 for automatic */
   int32_t pause;         /* 0/1 */
   int32_t damage;        /* damage ratio percent, 50..200 */
   int32_t friendly_fire; /* 0/1 */
@@ -83,6 +83,17 @@ typedef struct MeleeNetplayUi {
   /* runtime -> renderer */
   int32_t phase, open, is_host, local_id, room_id, player_count, room_count;
   int32_t frame, epoch, delay, stalled_ms, desynced, ping_ms, session_active, all_ready;
+  /* Live match health. `interrupted` means the match is held, not over:
+   * interrupt_text says why and interrupt_ms how long it has been held, so the
+   * renderer can show a countdown instead of a disconnect. */
+  int32_t interrupted, interrupt_ms, interrupt_limit_ms, reconnecting;
+  char interrupt_text[96];
+  /* Transport and clock diagnostics, for the in-match overlay. */
+  int32_t udp_active;         /* 1 while inputs take the unreliable path */
+  int32_t rollback_frames;    /* frames replayed over the last second */
+  int32_t rollbacks;          /* corrections over the last second */
+  int32_t clock_skips;        /* frames given back to hold the peers level */
+  int32_t frame_advantage;    /* negative when we are running ahead */
   char status[160];
   char server[128];
   char name[32];

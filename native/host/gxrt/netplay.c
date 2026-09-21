@@ -43,6 +43,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "rollback.h"
+#include "timesync.h"
 #include "costume_art.h"
 #ifdef _WIN32
 #undef X509_NAME
@@ -62,9 +63,30 @@ extern int aurora_link_widescreen(int set, int value);
 extern int aurora_link_aspect_lock(int command);
 
 #define NP_RING 1024
+/* Every packet repeats the last few frames of input. Over UDP that is what
+ * repairs a dropped datagram without waiting for a retransmission; over TCP
+ * it costs a little bandwidth and covers a peer that asked for a resend. */
 #define NP_REDUNDANT 8
-#define NP_STALL_TIMEOUT_MS 12000
-#define NP_PEER_TIMEOUT_MS 20000
+/* A hiccup is not a disconnect. The match is held, visibly, and resumes the
+ * moment input arrives again; only a link that stays dead this long ends it. */
+#define NP_STALL_GRACE_MS 45000
+/* Shown as "waiting for opponent" once a frame has waited this long. */
+#define NP_STALL_NOTICE_MS 250
+#define NP_PEER_TIMEOUT_MS 45000
+/* Before the first frame there is no match to protect, so peers that never
+ * reach each other are reported promptly instead of after the match grace. */
+#define NP_ARM_TIMEOUT_MS 20000
+/* A dropped lobby connection during a match is reconnected underneath the
+ * players rather than ending the session. */
+#define NP_RECONNECT_GRACE_MS 40000
+#define NP_RECONNECT_BACKOFF_MS 1500
+/* A peer that said goodbye may simply be reconnecting; wait before believing it. */
+#define NP_BYE_GRACE_MS 8000
+#define NP_PING_INTERVAL_MS 200
+#define NP_SYNC_INTERVAL 30      /* frames between clock corrections */
+#define NP_UDP_PROBE_MS 200
+#define NP_UDP_QUIET_MS 1500     /* UDP considered lost; fall back to TCP */
+#define NP_UDP_TOKEN 32
 #define NP_MAGIC 0x4D4C4E50u   /* 'MLNP' */
 #define NP_DEFAULT_PORT 7420
 /* The public hostname is safe to distribute. Deployment-specific routing is
@@ -96,17 +118,45 @@ static int is_official(const char* server) { return server && !strcmp(server, of
 #define FN_PREFS 0x8015CC58u
 #define FN_PLAYER_ENTITY 0x80034110u
 
-enum { PKT_HELLO = 0, PKT_INPUT = 1, PKT_BYE = 2, PKT_REQUEST = 3 };
+enum { PKT_HELLO = 0, PKT_INPUT = 1, PKT_BYE = 2, PKT_REQUEST = 3, PKT_PING = 4, PKT_PONG = 5 };
 
 #pragma pack(push, 1)
 typedef struct NetInput { uint16_t buttons; int8_t sx, sy, cx, cy; uint8_t lt, rt; } NetInput;
 typedef struct RelayHeader { uint32_t magic, session; uint16_t from, to; } RelayHeader;
-typedef struct InputHeader { uint8_t type, epoch, port, count; uint32_t last_frame, ack, hash_frame, hash; } InputHeader;
+/* `ack` is the sender's own simulated frame when the packet left, and
+ * `advantage` is how far behind us they measure themselves to be. The pair is
+ * what lets both sides agree on which one is running ahead. */
+typedef struct InputHeader { uint8_t type, epoch, port, count; uint32_t last_frame, ack, hash_frame, hash; int8_t advantage; } InputHeader;
+typedef struct PingPacket { uint8_t type, port; uint32_t tick; } PingPacket;
 #pragma pack(pop)
 typedef struct InputSlot { uint8_t valid; int epoch; uint32_t frame; NetInput in; } InputSlot;
 
+/* Everything measured about one other player: how far apart the two clocks
+ * have drifted, how long the link has been quiet, and whether they have said
+ * goodbye (which is not yet the same as being gone). */
+typedef struct NetPeer {
+  TimeSync sync;
+  uint32_t last_frame;        /* newest frame they have reported running */
+  int advantage;              /* our measurement, sent back to them */
+  int remote_advantage;       /* theirs, as received */
+  DWORD ping_sent, last_rx;
+  uint32_t ping_tick;
+  int ping_outstanding;
+  int gone; DWORD gone_at;    /* PKT_BYE seen; they may still be reconnecting */
+} NetPeer;
+static NetPeer np_peer[4];
+
+typedef struct NetSend {
+  struct NetSend* next;
+  size_t length, offset;
+  char data[];
+} NetSend;
+#define NP_SEND_LIMIT (1024u * 1024u)
 static struct {
   CRITICAL_SECTION lock, send_lock;
+  NetSend *send_head, *send_tail;
+  size_t send_bytes;
+  int send_failed;
   MeleeNetplayUi ui;
 #ifdef _WIN32
   HANDLE thread;
@@ -137,13 +187,31 @@ static struct {
   uint8_t backup_rules[0x18], backup_prefs[0x20], backup_vs[0x140]; int rules_backed, vs_backed;
   DWORD stall_started;
   char script[4096]; int have_script;
+  /* Unreliable side channel. Input is ordered by the frame numbers it carries,
+   * never by the transport, so datagrams may arrive late, twice or not at all.
+   * Losing one costs nothing: the next packet repeats it. Losing one inside a
+   * TCP stream stalls every input behind it until the retransmission lands,
+   * which is the stutter this channel exists to remove. */
+  SOCKET udp; struct sockaddr_in udp_addr;
+  int udp_offered, udp_ready; DWORD udp_last_rx, udp_last_probe;
+  char udp_token[NP_UDP_TOKEN + 1];
+  /* Session continuity. An interruption holds the match; it does not end it. */
+  volatile LONG interrupted;
+  DWORD interrupt_since; char interrupt_why[96];
+  int resuming; DWORD resume_since, reconnect_at;
+  /* The relay sizes the automatic delay from the round trip we report to it,
+   * so a fresh measurement is pushed as soon as it exists rather than on the
+   * next heartbeat -- a room can be created and started in under a second. */
+  int ping_reported;
+  /* Clock agreement, applied by the scene loop. */
+  int skip_frames;
 } np;
 
 static Rollback rollback;
 static int rollback_match, rollback_running, rollback_step, rollback_replay;
 static RbInput rollback_pads[4];
 static uint32_t rollback_hash_sent;
-static uint64_t rollback_clock;
+static uint64_t rollback_clock, rollback_audio_origin, rollback_audio_clock;
 static int rollback_service;
 static unsigned rollback_progress;
 /* Guest-thread only: asynchronous devices must not mutate an atomic simulation
@@ -152,6 +220,7 @@ int netplay_simulating(void) { return rollback_step; }
 int netplay_replaying(void) { return rollback_replay; }
 int netplay_devices_deferred(void) { return rollback_running && !rollback_service; }
 int netplay_async_deferred(void) { return rollback_running; }
+int netplay_audio_clock(uint64_t* clock) { if (!rollback_running) return 0; *clock = rollback_audio_clock; return 1; }
 int netplay_clock(uint64_t* clock) { if (!rollback_running) return 0; *clock = rollback_clock; return 1; }
 void netplay_progress(Context* ctx) {
   if (!rollback_step || rollback_service || !(ctx->msr & 0x8000u)) return;
@@ -266,13 +335,15 @@ static void json_escape(const char* in, char* out, unsigned cap) {
 }
 
 /* ---- rules ----------------------------------------------------------------- */
-static void rules_default(NetplayRules* r) { r->mode = 1; r->stock = 4; r->minutes = 8; r->items = 0; r->delay = 3; r->pause = 1; r->damage = 100; r->friendly_fire = 0; }
+static void rules_default(NetplayRules* r) { r->mode = 1; r->stock = 4; r->minutes = 8; r->items = 0; r->delay = 0; r->pause = 1; r->damage = 100; r->friendly_fire = 0; }
 static void rules_clamp(NetplayRules* r) {
   if (r->mode < 0 || r->mode > 1) r->mode = 1;
   if (r->stock < 1) r->stock = 1; if (r->stock > 99) r->stock = 99;
   if (r->minutes < 0) r->minutes = 0; if (r->minutes > 99) r->minutes = 99;
   if (r->items < 0) r->items = 0; if (r->items > 5) r->items = 5;
-  if (r->delay < 1) r->delay = 1; if (r->delay > 10) r->delay = 10;
+  /* 0 keeps the delay automatic: it is resolved from the measured link when
+   * the match starts, rather than guessed before anyone has connected. */
+  if (r->delay < 0) r->delay = 0; if (r->delay > 10) r->delay = 10;
   r->pause = r->pause ? 1 : 0; r->friendly_fire = r->friendly_fire ? 1 : 0;
   if (r->damage < 50) r->damage = 50; if (r->damage > 200) r->damage = 200;
 }
@@ -389,22 +460,49 @@ static int np_tls_handshake(void) {
   return 0;
 }
 /* ---- sockets ---------------------------------------------------------------- */
+/* Guest input submission only enqueues. The network thread owns SSL writes,
+ * including retrying the same buffer after WANT_READ/WANT_WRITE. Congestion
+ * must never sleep in the simulation thread or partially interleave JSON. */
 static void tcp_send_line(const char* line) {
-  if (!line || strlen(line) > 65530) return;
+  if (!line) return;
+  size_t length = strlen(line);
+  if (length > 65530) return;
   EnterCriticalSection(&np.send_lock);
-  SOCKET socket = np.tcp;
-  if (socket == INVALID_SOCKET || !np.connected) { LeaveCriticalSection(&np.send_lock); return; }
-  size_t length = strlen(line), offset = 0;
-  char message[65536]; memcpy(message, line, length); message[length++] = '\n';
-  DWORD started = GetTickCount();
-  while (offset < length && !np.quit) {
-    int n = np_send(socket, message + offset, (int)(length - offset));
-    if (n > 0) { offset += (size_t)n; continue; }
-    if (n < 0 && WSAGetLastError() == WSAEWOULDBLOCK && GetTickCount() - started < 2000) { Sleep(1); continue; }
-    /* An incomplete JSON line cannot be followed by a different message. */
-    shutdown(socket, SD_BOTH); break;
+  if (np.tcp == INVALID_SOCKET || !np.connected || np.send_failed) {
+    LeaveCriticalSection(&np.send_lock); return;
   }
+  if (np.send_bytes + length + 1 > NP_SEND_LIMIT) {
+    np.send_failed = 1; LeaveCriticalSection(&np.send_lock); return;
+  }
+  NetSend* item = malloc(sizeof *item + length + 1);
+  if (!item) { np.send_failed = 1; LeaveCriticalSection(&np.send_lock); return; }
+  item->next = NULL; item->length = length + 1; item->offset = 0;
+  memcpy(item->data, line, length); item->data[length] = '\n';
+  if (np.send_tail) np.send_tail->next = item; else np.send_head = item;
+  np.send_tail = item; np.send_bytes += item->length;
   LeaveCriticalSection(&np.send_lock);
+}
+static int tcp_flush(void) {
+  /* A bounded batch leaves time to receive input and process lobby commands. */
+  for (unsigned batch = 0; batch < 32; ++batch) {
+    EnterCriticalSection(&np.send_lock);
+    NetSend* item = np.send_head;
+    int failed = np.send_failed;
+    LeaveCriticalSection(&np.send_lock);
+    if (failed) return 0;
+    if (!item) return 1;
+    int n = np_send(np.tcp, item->data + item->offset, (int)(item->length - item->offset));
+    if (n <= 0) return n < 0 && WSAGetLastError() == WSAEWOULDBLOCK;
+    EnterCriticalSection(&np.send_lock);
+    item->offset += (size_t)n;
+    if (item->offset == item->length) {
+      np.send_head = item->next;
+      if (!np.send_head) np.send_tail = NULL;
+      np.send_bytes -= item->length; free(item);
+    }
+    LeaveCriticalSection(&np.send_lock);
+  }
+  return 1;
 }
 static const char B64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 static unsigned b64_encode(const unsigned char* in, unsigned len, char* out, unsigned cap) {
@@ -434,20 +532,87 @@ static unsigned b64_decode(const char* in, unsigned char* out, unsigned cap) {
   }
   return n;
 }
-/* Match traffic rides the lobby connection: the only ports open on most hosts
- * are the ones already serving something, so the relay cannot have its own. */
+/* ---- match traffic ----------------------------------------------------------
+ * Two paths carry the same packets. The lobby connection always works, because
+ * it is the port the server already answers on, but it is a stream: one lost
+ * segment holds every input behind it until the retransmission arrives, which
+ * is felt as a freeze and then a burst of rollbacks. The datagram path has no
+ * such ordering, and input packets do not need any -- each one names the exact
+ * frames it carries and repeats the previous few, so a lost datagram is
+ * repaired by the next one about sixteen milliseconds later.
+ *
+ * The datagram path is used only once packets have been seen arriving on it,
+ * and is abandoned the moment it goes quiet, so a blocked UDP port or a
+ * hostile middlebox costs nothing beyond the probes. */
+static void udp_send(const void* payload, unsigned len) {
+  /* The guest thread sends here while the network thread may be closing the
+   * socket; send_lock is the same one the stream queue uses, and neither
+   * caller holds it across anything that blocks. */
+  EnterCriticalSection(&np.send_lock);
+  if (np.udp != INVALID_SOCKET && np.udp_token[0] && len + NP_UDP_TOKEN <= 1500) {
+    unsigned char datagram[1500];
+    memcpy(datagram, np.udp_token, NP_UDP_TOKEN);
+    memcpy(datagram + NP_UDP_TOKEN, payload, len);
+    sendto(np.udp, (const char*)datagram, (int)(len + NP_UDP_TOKEN), 0,
+           (struct sockaddr*)&np.udp_addr, sizeof np.udp_addr);
+  }
+  LeaveCriticalSection(&np.send_lock);
+}
 static void relay_send(const void* payload, unsigned len, uint16_t to) {
-  if (np.tcp == INVALID_SOCKET || !np.connected || !np.session) return;
-  unsigned char buffer[1400]; char encoded[1900], line[2048];
+  if (!np.connected || !np.session) return;
+  unsigned char buffer[1400];
   if (len + sizeof(RelayHeader) > sizeof buffer) return;
   RelayHeader h = { NP_MAGIC, np.session, (uint16_t)np.local_id, to };
   memcpy(buffer, &h, sizeof h); memcpy(buffer + sizeof h, payload, len);
-  b64_encode(buffer, len + (unsigned)sizeof h, encoded, sizeof encoded);
+  unsigned packed = len + (unsigned)sizeof h;
+  if (np.udp != INVALID_SOCKET) {
+    udp_send(buffer, packed);
+    /* Once the datagram path has proven itself the stream copy is dropped:
+     * sending both doubles the traffic and puts the slower copy in front of
+     * the lobby messages that still need the stream. */
+    if (np.udp_ready) return;
+  }
+  if (np.tcp == INVALID_SOCKET) return;
+  char encoded[1900], line[2048];
+  b64_encode(buffer, packed, encoded, sizeof encoded);
   snprintf(line, sizeof line, "{\"op\":\"r\",\"d\":\"%s\"}", encoded);
   tcp_send_line(line);
 }
-static void close_sockets(void) {
+static void udp_close(void) {
   EnterCriticalSection(&np.send_lock);
+  if (np.udp != INVALID_SOCKET) { closesocket(np.udp); np.udp = INVALID_SOCKET; }
+  np.udp_ready = np.udp_offered = 0; np.udp_token[0] = 0;
+  LeaveCriticalSection(&np.send_lock);
+  lock(); np.ui.udp_active = 0; unlock();
+}
+/* Open the side channel the server advertised. Failure is not an error: the
+ * stream path stays in place and nothing about the match changes. */
+static void udp_open(const char* token, int port) {
+  udp_close();
+  if (!token || !*token || port <= 0 || port > 65535) return;
+  if (strlen(token) != NP_UDP_TOKEN) return;
+  np.udp = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+  if (np.udp == INVALID_SOCKET) return;
+#ifdef _WIN32
+  { u_long nonblocking = 1; ioctlsocket(np.udp, FIONBIO, &nonblocking); }
+  /* A datagram refused by an unreachable host must not fail later receives. */
+  { DWORD off = 0; DWORD returned = 0;
+    WSAIoctl(np.udp, _WSAIOW(IOC_VENDOR, 12) /* SIO_UDP_CONNRESET */, &off, sizeof off, NULL, 0, &returned, NULL, NULL); }
+#else
+  { int flags = fcntl(np.udp, F_GETFL, 0); if (flags >= 0) fcntl(np.udp, F_SETFL, flags | O_NONBLOCK); }
+#endif
+  EnterCriticalSection(&np.send_lock);
+  np.udp_addr = np.server_addr; np.udp_addr.sin_port = htons((unsigned short)port);
+  memcpy(np.udp_token, token, NP_UDP_TOKEN); np.udp_token[NP_UDP_TOKEN] = 0;
+  LeaveCriticalSection(&np.send_lock);
+  np.udp_offered = 1; np.udp_last_rx = np.udp_last_probe = GetTickCount();
+  fprintf(stderr, "[netplay] datagram channel offered on port %d\n", port);
+}
+static void close_sockets(void) {
+  udp_close();
+  EnterCriticalSection(&np.send_lock);
+  while (np.send_head) { NetSend* next = np.send_head->next; free(np.send_head); np.send_head = next; }
+  np.send_tail = NULL; np.send_bytes = 0; np.send_failed = 0;
   np_tls_close();
   if (np.tcp != INVALID_SOCKET) { closesocket(np.tcp); np.tcp = INVALID_SOCKET; }
   np.connected = np.connecting = np.upgrading = 0; np.rx_len = 0;
@@ -462,7 +627,50 @@ static void end_session(const char* why) {
   relay_send(bye, sizeof bye, 0);
   np.session = 0;
   lock(); np.ui.session_active = 0; np.ui.phase = np.connected ? (np.ui.room_id ? NETPLAY_PHASE_ROOM : NETPLAY_PHASE_LOBBY) : NETPLAY_PHASE_OFFLINE; unlock();
+  memset(np_peer, 0, sizeof np_peer);
+  InterlockedExchange(&np.interrupted, 0); np.interrupt_why[0] = 0; np.skip_frames = 0;
+  np.resuming = 0;
+  lock(); np.ui.interrupted = 0; np.ui.interrupt_ms = 0; np.ui.interrupt_text[0] = 0;
+  np.ui.reconnecting = 0; np.ui.udp_active = 0; np.ui.frame_advantage = 0; unlock();
   char text[200]; snprintf(text, sizeof text, "Session ended: %s", why); status(text);
+}
+
+/* ---- interruptions ----------------------------------------------------------
+ * A match that loses its opponent for a moment is held, not ended. Everything
+ * that used to reach for end_session on the first sign of trouble comes here
+ * instead: the simulation state, the rollback window and the lobby session all
+ * stay exactly as they were, the players are told what is happening and for
+ * how much longer, and play resumes from the same frame the instant input
+ * arrives again. Only a link that stays dead past the grace period ends the
+ * session, and then it says so for a reason the players can act on. */
+static void np_interrupt(const char* why) {
+  DWORD now = GetTickCount();
+  int first;
+  if (!np.active) return;
+  lock();
+  first = !InterlockedExchange(&np.interrupted, 1);
+  if (first) np.interrupt_since = now;
+  snprintf(np.interrupt_why, sizeof np.interrupt_why, "%s", why ? why : "Waiting for opponent");
+  np.ui.interrupted = 1;
+  np.ui.interrupt_ms = (int)(now - np.interrupt_since);
+  np.ui.interrupt_limit_ms = NP_STALL_GRACE_MS;
+  snprintf(np.ui.interrupt_text, sizeof np.ui.interrupt_text, "%s", np.interrupt_why);
+  unlock();
+  if (first) fprintf(stderr, "[netplay] match held: %s\n", why ? why : "waiting");
+}
+static void np_resume(void) {
+  DWORD held;
+  lock();
+  if (!InterlockedExchange(&np.interrupted, 0)) { unlock(); return; }
+  held = GetTickCount() - np.interrupt_since;
+  np.interrupt_why[0] = 0;
+  np.ui.interrupted = 0; np.ui.interrupt_ms = 0; np.ui.interrupt_text[0] = 0;
+  unlock();
+  fprintf(stderr, "[netplay] match resumed after %u ms\n", (unsigned)held);
+}
+/* Milliseconds the match has been held, or 0 when it is running normally. */
+static DWORD np_interrupt_age(void) {
+  return np.interrupted ? GetTickCount() - np.interrupt_since : 0;
 }
 static void store_input(int port, int epoch, uint32_t frame, const NetInput* in) {
   InputSlot* slot = &np.inputs[port][epoch & 1][frame % NP_RING];
@@ -481,14 +689,32 @@ static const NetInput* get_input(int port, int epoch, uint32_t frame) {
   const InputSlot* slot = &np.inputs[port][epoch & 1][frame % NP_RING];
   return (slot->valid && slot->epoch == epoch && slot->frame == frame) ? &slot->in : NULL;
 }
+/* How far behind the peers we believe we are, as one number to put on the
+ * wire. With more than two players the furthest-ahead peer is the one that
+ * matters: correcting towards anyone slower would leave that peer predicting. */
+static int np_local_advantage(void) {
+  int advantage = 0, have = 0;
+  for (int p = 0; p < 4; ++p) {
+    if (!np.port_ids[p] || p == np.local_port) continue;
+    int value = timesync_advantage(&np_peer[p].sync, np.frame, np_peer[p].last_frame);
+    if (!have || value < advantage) { advantage = value; have = 1; }
+  }
+  return have ? advantage : 0;
+}
 static void send_inputs(uint32_t upto, unsigned max_count) {
   unsigned char buffer[1200]; InputHeader h; unsigned count = 0;
   uint32_t first = upto + 1 > max_count ? upto + 1 - max_count : 0;
   NetInput list[64];
   lock();
+  while (!get_input(np.local_port, np.epoch, upto)) {
+    if (!upto || upto <= first) { unlock(); return; }
+    --upto;
+  }
   for (uint32_t f = first; f <= upto && count < 64; f++) { const NetInput* in = get_input(np.local_port, np.epoch, f); if (!in) { count = 0; first = f + 1; continue; } list[count++] = *in; }
   h.type = PKT_INPUT; h.epoch = (uint8_t)np.epoch; h.port = (uint8_t)np.local_port; h.count = (uint8_t)count;
   h.last_frame = upto; h.ack = np.frame;
+  { int advantage = np_local_advantage();
+    h.advantage = (int8_t)(advantage > 127 ? 127 : advantage < -128 ? -128 : advantage); }
   /* A peer that has not run a frame yet has no hash to send. Saying so with a
      frame number that can never be compared keeps the far side from reading the
      empty value as a real hash of frame 0 and calling it a desync. */
@@ -499,6 +725,34 @@ static void send_inputs(uint32_t upto, unsigned max_count) {
   memcpy(buffer, &h, sizeof h); memcpy(buffer + sizeof h, list, count * sizeof(NetInput));
   relay_send(buffer, (unsigned)(sizeof h + count * sizeof(NetInput)), 0);
 }
+/* Round-trip measurement. The lobby ping measures the path to the server,
+ * which is not the path the inputs take and is not what the clock correction
+ * or the automatic delay need; both of those need the time to the other
+ * player. One outstanding probe at a time keeps the samples honest. */
+static void ping_peers(void) {
+  DWORD now = GetTickCount();
+  for (int p = 0; p < 4; ++p) {
+    if (!np.port_ids[p] || p == np.local_port) continue;
+    NetPeer* peer = &np_peer[p];
+    if (peer->ping_outstanding && now - peer->ping_sent < NP_PING_INTERVAL_MS * 5) continue;
+    if (now - peer->ping_sent < NP_PING_INTERVAL_MS) continue;
+    peer->ping_sent = now; peer->ping_tick = (uint32_t)now; peer->ping_outstanding = 1;
+    PingPacket ping = { PKT_PING, (uint8_t)np.local_port, peer->ping_tick };
+    relay_send(&ping, sizeof ping, (uint16_t)np.port_ids[p]);
+  }
+}
+/* The peer round-trip the match is actually running on, in milliseconds. */
+static int np_peer_ping(void) {
+  unsigned worst = 0; int have = 0;
+  for (int p = 0; p < 4; ++p) {
+    if (!np.port_ids[p] || p == np.local_port) continue;
+    unsigned rtt = timesync_rtt(&np_peer[p].sync);
+    if (!rtt) continue;
+    if (rtt > worst) worst = rtt;
+    have = 1;
+  }
+  return have ? (int)worst : -1;
+}
 static void handle_relay(const unsigned char* data, int len) {
   if (len < (int)sizeof(RelayHeader)) return;
   RelayHeader h; memcpy(&h, data, sizeof h);
@@ -508,10 +762,39 @@ static void handle_relay(const unsigned char* data, int len) {
   int from_port = -1;
   for (int p = 0; p < 4; p++) if (np.port_ids[p] == h.from) from_port = p;
   if (from_port < 0 || from_port == np.local_port) return;
-  np.last_rx = GetTickCount();
+  DWORD arrived = GetTickCount();
+  np.last_rx = arrived;
   np.peer_seen[from_port] = 1;
+  np_peer[from_port].last_rx = arrived;
+  /* Anything at all from a peer that had said goodbye means they are back. */
+  if (np_peer[from_port].gone && payload[0] != PKT_BYE) {
+    np_peer[from_port].gone = 0;
+    fprintf(stderr, "[netplay] port %d came back\n", from_port + 1);
+  }
   if (payload[0] == PKT_HELLO) return;
-  if (payload[0] == PKT_BYE) { end_session("Opponent left"); return; }
+  if (payload[0] == PKT_PING && len >= (int)sizeof(PingPacket)) {
+    PingPacket ping; memcpy(&ping, payload, sizeof ping);
+    ping.type = PKT_PONG; ping.port = (uint8_t)np.local_port;
+    relay_send(&ping, sizeof ping, h.from);
+    return;
+  }
+  if (payload[0] == PKT_PONG && len >= (int)sizeof(PingPacket)) {
+    PingPacket pong; memcpy(&pong, payload, sizeof pong);
+    NetPeer* peer = &np_peer[from_port];
+    if (peer->ping_outstanding && pong.tick == peer->ping_tick) {
+      peer->ping_outstanding = 0;
+      lock(); timesync_rtt_sample(&peer->sync, (unsigned)(arrived - peer->ping_sent)); unlock();
+    }
+    return;
+  }
+  if (payload[0] == PKT_BYE) {
+    /* Leaving and dropping out look identical on the wire, and a client that
+     * is reconnecting sends nothing at all while it does so. Hold the match
+     * and let the grace period decide which of the two this was. */
+    np_peer[from_port].gone = 1; np_peer[from_port].gone_at = arrived;
+    np_interrupt("Opponent left the match");
+    return;
+  }
   if (payload[0] == PKT_REQUEST && len >= 5) {
     uint32_t from = 0; memcpy(&from, payload + 1, 4);
     lock(); uint32_t latest = np.frame + (uint32_t)np.delay; unlock();
@@ -534,6 +817,11 @@ static void handle_relay(const unsigned char* data, int len) {
     store_input(from_port, np.epoch + epoch_distance, frame, &in);
   }
   np.remote_hash_epoch[from_port] = ih.epoch; np.remote_hash_frame[from_port] = ih.hash_frame; np.remote_hash[from_port] = ih.hash; np.remote_hash_new[from_port] = 1;
+  /* The two halves of the clock correction: where they say they are, and how
+   * far behind us they measure themselves to be. */
+  if (!epoch_distance && ih.ack + 1u > np_peer[from_port].last_frame)
+    np_peer[from_port].last_frame = ih.ack;
+  np_peer[from_port].remote_advantage = ih.advantage;
   unlock();
 }
 
@@ -575,8 +863,8 @@ static void handle_line(const char* line) {
   }
   if (!strcmp(op, "welcome") || !strcmp(op, "start")) {
     char sync[32]; json_str(line, "sync", sync, sizeof sync);
-    if (json_int(line, "version", 0) != 2 || strcmp(sync, "rollback-v1")) {
-      disconnect("Incompatible netplay server; rollback protocol v2 is required"); return;
+    if (json_int(line, "version", 0) != 2 || strcmp(sync, "rollback-v2")) {
+      disconnect("Incompatible netplay server; this build needs the rollback v2 update"); return;
     }
   }
   if (!strcmp(op, "avatar_part")) { profile_picture_part(line); return; }
@@ -588,11 +876,24 @@ static void handle_line(const char* line) {
     nm_welcome(line);
     if (!nm.has_compat || (g_mex_active && !nm.has_upstream)) { disconnect("The server needs the current netplay update."); return; }
     np.local_id = (int)json_int(line, "id", 0);
+    { char token[NP_UDP_TOKEN + 8]; json_str(line, "udp_token", token, sizeof token);
+      int udp_port = (int)json_int(line, "udp_port", 0);
+      if (udp_port > 0 && token[0]) udp_open(token, udp_port); }
+    if (np.resuming && np.session) {
+      /* Reclaim the match we were already in rather than landing in the lobby. */
+      char line_out[128];
+      snprintf(line_out, sizeof line_out, "{\"op\":\"resume\",\"session\":%u}", (unsigned)np.session);
+      lock(); np.ui.local_id = np.local_id; unlock();
+      tcp_send_line(line_out);
+      status("Rejoining the match...");
+      return;
+    }
     lock(); np.ui.local_id = np.local_id; np.ui.phase = NETPLAY_PHASE_LOBBY; unlock();
     status("Connected to server");
     tcp_send_line("{\"op\":\"list\"}");
   } else if (!strcmp(op, "pong")) {
     lock(); np.ui.ping_ms = (int)(GetTickCount() - np.last_ping); unlock();
+    np.ping_reported = 0;
   } else if (!strcmp(op, "rooms")) {
     lock();
     np.ui.room_count = 0;
@@ -625,7 +926,15 @@ static void handle_line(const char* line) {
     if (!nm_start_ok(line)) { tcp_send_line("{\"op\":\"leave\"}"); status("Matching costumes were not ready. Session canceled."); return; }
     np.session = (uint32_t)json_int(line, "session", 0); np.seed = (uint32_t)json_int(line, "seed", 1);
     NetplayRules rules; rules_from_json(json_find(line, "rules"), &rules);
-    np.delay = rules.delay;
+    /* One delay for the whole session, resolved by the relay from the round
+     * trips both clients reported to it -- which is the path their inputs
+     * actually take to each other. It must be identical on both sides: the
+     * frames before the delay are seeded as known-empty input on every port,
+     * so two clients disagreeing about that boundary would contradict each
+     * other the first time someone held a direction on frame zero. */
+    np.delay = (int)json_int(line, "delay", rules.delay ? rules.delay : 3);
+    if (np.delay < 1) np.delay = 1;
+    if (np.delay > 10) np.delay = 10;
     memset(np.port_ids, 0, sizeof np.port_ids); memset(np.peer_seen, 0, sizeof np.peer_seen); np.local_port = -1;
     const char* cursor = json_find(line, "players"); const char* p;
     while (cursor && (p = json_next(&cursor))) {
@@ -637,8 +946,46 @@ static void handle_line(const char* line) {
     if (np.local_port < 0 || !np.session) { status("Invalid session from server"); return; }
     lock(); np.ui.rules = rules; np.ui.delay = np.delay; np.ui.phase = NETPLAY_PHASE_STARTING; np.ui.session_active = 1; np.ui.desynced = 0; np.ui.stalled_ms = 0; unlock();
     memset(np.inputs, 0, sizeof np.inputs); np.epoch = 0; np.frame = 0; InterlockedExchange(&np.desynced, 0);
+    memset(np_peer, 0, sizeof np_peer);
+    for (int p = 0; p < 4; ++p) timesync_reset(&np_peer[p].sync);
+    np.skip_frames = 0; np.resuming = 0;
+    InterlockedExchange(&np.interrupted, 0); np.interrupt_why[0] = 0;
+    lock(); np.ui.interrupted = 0; np.ui.interrupt_ms = 0; np.ui.interrupt_text[0] = 0;
+    np.ui.reconnecting = 0; np.ui.clock_skips = 0; np.ui.rollbacks = 0; np.ui.rollback_frames = 0; unlock();
     InterlockedExchange(&np.guest_started, 0); InterlockedExchange(&np.armed, 1); np.last_hello = 0; np.last_rx = GetTickCount();
     status("Connecting to players...");
+  } else if (!strcmp(op, "held")) {
+    /* The other player's connection dropped and the server is keeping their
+     * place. Say so rather than leaving the match apparently frozen. */
+    if (np.active) {
+      long seconds = json_int(line, "seconds", 0);
+      char text[96];
+      if (seconds > 0) snprintf(text, sizeof text, "Opponent is reconnecting (up to %lds)", seconds);
+      else snprintf(text, sizeof text, "Opponent is reconnecting");
+      np_interrupt(text);
+    }
+  } else if (!strcmp(op, "resumed")) {
+    /* The server still had the session and has put us back in it, with a new
+     * client id and a fresh datagram token. Our port assignment and the seed
+     * are unchanged, so the simulation carries on from the frame it held on. */
+    int ok = (int)json_int(line, "ok", 0);
+    if (!ok) { np.resuming = 0; end_session("The match could not be rejoined"); return; }
+    int previous = np.local_id;
+    np.local_id = (int)json_int(line, "id", np.local_id);
+    for (int p = 0; p < 4; ++p) if (np.port_ids[p] == previous) np.port_ids[p] = np.local_id;
+    const char* players = json_find(line, "players"); const char* entry;
+    while (players && (entry = json_next(&players))) {
+      int id = (int)json_int(entry, "id", 0), port = (int)json_int(entry, "port", -1);
+      if (port >= 0 && port < 4 && id > 0 && id <= 65535) np.port_ids[port] = id;
+    }
+    { char token[NP_UDP_TOKEN + 8]; json_str(line, "udp_token", token, sizeof token);
+      int udp_port = (int)json_int(line, "udp_port", 0);
+      if (udp_port > 0 && token[0]) udp_open(token, udp_port); }
+    np.resuming = 0; np.last_rx = GetTickCount();
+    lock(); np.ui.local_id = np.local_id; np.ui.reconnecting = 0; np.ui.phase = NETPLAY_PHASE_PLAYING; unlock();
+    np_resume();
+    status("Rejoined the match");
+    fprintf(stderr, "[netplay] rejoined session %u as id %d\n", np.session, np.local_id);
   } else if (!strcmp(op, "ended")) {
     end_session("Server ended the session");
   }
@@ -672,10 +1019,19 @@ static int resolve_server(const char* text, struct sockaddr_in* out) {
   freeaddrinfo(result);
   return 1;
 }
+/* A failed attempt during a reconnect must not look like going offline: the
+ * match is still there, the aspect lock must stay held for it, and the loop
+ * will try again shortly. */
+static void connect_failed(const char* why) {
+  status(why);
+  if (np.resuming && np.active) { ui_set_phase(NETPLAY_PHASE_PLAYING); return; }
+  nm_release_aspect();
+  ui_set_phase(NETPLAY_PHASE_OFFLINE);
+}
 static void start_connect(void) {
   close_sockets();
   nm.hello_sent = nm.has_protocol = nm.has_compat = 0;
-  if (!nm_bind_aspect()) { status("Update the renderer before using Online."); ui_set_phase(NETPLAY_PHASE_OFFLINE); return; }
+  if (!nm_bind_aspect()) { connect_failed("Update the renderer before using Online."); return; }
   if (!nm.compat_ready) {
     nm.connect_pending = 1;
     ui_set_phase(NETPLAY_PHASE_CONNECTING);
@@ -687,13 +1043,13 @@ static void start_connect(void) {
   lock(); np.ui.ping_ms = -1; unlock();
   char server[128], name[32];
   lock(); snprintf(server, sizeof server, "%s", np.ui.server); snprintf(name, sizeof name, "%s", np.ui.name); unlock();
-  if (!resolve_server(server, &np.server_addr)) { status("Cannot resolve server address"); nm_release_aspect(); ui_set_phase(NETPLAY_PHASE_OFFLINE); return; }
+  if (!resolve_server(server, &np.server_addr)) { connect_failed("Cannot resolve server address"); return; }
   np.tcp = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-  if (np.tcp == INVALID_SOCKET) { status("Cannot create socket"); nm_release_aspect(); ui_set_phase(NETPLAY_PHASE_OFFLINE); return; }
+  if (np.tcp == INVALID_SOCKET) { connect_failed("Cannot create socket"); return; }
 #ifdef _WIN32
-  { u_long nonblocking = 1; if (ioctlsocket(np.tcp, FIONBIO, &nonblocking) != 0) { closesocket(np.tcp); np.tcp = INVALID_SOCKET; status("Socket setup failed"); nm_release_aspect(); ui_set_phase(NETPLAY_PHASE_OFFLINE); return; } }
+  { u_long nonblocking = 1; if (ioctlsocket(np.tcp, FIONBIO, &nonblocking) != 0) { closesocket(np.tcp); np.tcp = INVALID_SOCKET; connect_failed("Socket setup failed"); return; } }
 #else
-  { int flags = fcntl(np.tcp, F_GETFL, 0); if (flags < 0 || fcntl(np.tcp, F_SETFL, flags | O_NONBLOCK) < 0) { closesocket(np.tcp); np.tcp = INVALID_SOCKET; status("Socket setup failed"); nm_release_aspect(); ui_set_phase(NETPLAY_PHASE_OFFLINE); return; } }
+  { int flags = fcntl(np.tcp, F_GETFL, 0); if (flags < 0 || fcntl(np.tcp, F_SETFL, flags | O_NONBLOCK) < 0) { closesocket(np.tcp); np.tcp = INVALID_SOCKET; connect_failed("Socket setup failed"); return; } }
 #endif
   { int nodelay = 1; setsockopt(np.tcp, IPPROTO_TCP, TCP_NODELAY, (const char*)&nodelay, sizeof nodelay); }
   connect(np.tcp, (struct sockaddr*)&np.server_addr, sizeof np.server_addr);
@@ -702,6 +1058,7 @@ static void start_connect(void) {
   status(nm.compat_ready ? "Connecting..." : "Checking game files...");
 }
 static void disconnect(const char* why);
+static void link_lost(const char* why);
 static void send_hello(void) {
   if (nm.hello_sent || !nm.compat_ready) return;
   if (!nm_aspect_valid()) { disconnect("Aspect setting changed. Reconnect to Online."); return; }
@@ -709,14 +1066,17 @@ static void send_hello(void) {
   lock(); snprintf(name, sizeof name, "%s", np.ui.name); unlock();
   if (!name[0]) snprintf(name, sizeof name, "Player");
   json_escape(name, escaped, sizeof escaped);
-  char line[900]; snprintf(line, sizeof line, "{\"op\":\"hello\",\"name\":\"%s\",\"version\":2,\"sync\":\"rollback-v1\",\"features\":[\"mods-v1\",\"compat-v1\",\"profile-v1\",\"upstream-builds-v1\"],\"compatibility\":{\"schema\":1,\"fingerprint\":\"%s\",\"runtime\":\"%s\",\"game\":\"%s\"}}", escaped, nm.fingerprint, nm.runtime_hash, nm.game_hash);
+  char line[900]; snprintf(line, sizeof line, "{\"op\":\"hello\",\"name\":\"%s\",\"version\":2,\"sync\":\"rollback-v2\",\"features\":[\"mods-v1\",\"compat-v1\",\"profile-v1\",\"upstream-builds-v1\"],\"compatibility\":{\"schema\":1,\"fingerprint\":\"%s\",\"runtime\":\"%s\",\"game\":\"%s\"}}", escaped, nm.fingerprint, nm.runtime_hash, nm.game_hash);
   if(g_mex_active){size_t n=strlen(line);snprintf(line+n-1,sizeof line-n+1,",\"upstream_build\":{\"id\":\"akaneia\",\"version\":\"%s\",\"sha256\":\"%s\"}}",AKANEIA_RELEASE,AKANEIA_SHA256);}
   nm.hello_sent = 1; tcp_send_line(line);
 }
 static void finish_connect(void) {
-  np.connected = 1; np.connecting = 0; np.last_ping = GetTickCount();
+  /* Due immediately: the first measurement has to exist before the player
+   * can start a room, not two seconds later. */
+  np.connected = 1; np.connecting = 0; np.last_ping = GetTickCount() - 2000;
+  np.ping_reported = 0;
   if (np.http_path[0]) {
-    if (np.use_tls && !np_tls_handshake()) { disconnect("TLS handshake failed"); return; }
+    if (np.use_tls && !np_tls_handshake()) { link_lost("TLS handshake failed"); return; }
     /* Ask the web server to hand the connection over; the protocol starts
      * once it answers 101. */
     char request[512];
@@ -726,7 +1086,7 @@ static void finish_connect(void) {
     { DWORD send_deadline = GetTickCount() + 5000;
     for (int sent = 0; sent < n; ) {
       int w = np_send(np.tcp, request + sent, n - sent);
-      if (w <= 0) { int e = WSAGetLastError(); if (e == WSAEWOULDBLOCK || e == EAGAIN) { if (np.quit || GetTickCount() > send_deadline) { disconnect("Send timed out"); return; } Sleep(1); continue; } disconnect("Could not reach the server"); return; }
+      if (w <= 0) { int e = WSAGetLastError(); if (e == WSAEWOULDBLOCK || e == EAGAIN) { if (np.quit || GetTickCount() > send_deadline) { link_lost("Send timed out"); return; } Sleep(1); continue; } link_lost("Could not reach the server"); return; }
       sent += w;
     } }
     np.upgrading = 1;
@@ -742,6 +1102,26 @@ static void disconnect(const char* why) {
   close_sockets();
   lock(); np.ui.room_id = 0; np.ui.player_count = 0; np.ui.room_count = 0; np.ui.room_name_open = 0; np.ui.phase = NETPLAY_PHASE_OFFLINE; np.ui.ping_ms = -1; unlock();
   status(why);
+}
+/* The lobby connection went away on its own.
+ *
+ * With no match running this is an ordinary disconnect. With a match running
+ * it is not: the session id, the simulation, the rollback window and the
+ * other player are all still there, and the only thing that has failed is a
+ * socket. Rebuild it underneath the players and rejoin the same session. The
+ * aspect lock and the verified game files are deliberately kept, because
+ * neither may change in the middle of a match. */
+static void link_lost(const char* why) {
+  if (!np.active) { disconnect(why); return; }
+  if (!np.resuming) {
+    np.resuming = 1; np.resume_since = GetTickCount();
+    np.reconnect_at = GetTickCount() - NP_RECONNECT_BACKOFF_MS;
+    fprintf(stderr, "[netplay] lobby link lost during a match (%s); reconnecting\n", why ? why : "unknown");
+  }
+  close_sockets();
+  nm.hello_sent = nm.has_protocol = nm.has_compat = 0;
+  lock(); np.ui.reconnecting = 1; unlock();
+  np_interrupt("Reconnecting to the server");
 }
 static void process_command(void) {
   lock();
@@ -767,6 +1147,50 @@ static void process_command(void) {
   case NETPLAY_CMD_RULES: rules_clamp(&rules); rules_to_json(&rules, rules_text, sizeof rules_text); snprintf(line, sizeof line, "{\"op\":\"rules\",\"rules\":%s}", rules_text); tcp_send_line(line); break;
   case NETPLAY_CMD_CLOSE: InterlockedExchange(&np.lobby_open, 0); lock(); np.ui.open = 0; unlock(); break;
   case NETPLAY_CMD_END_SESSION: end_session("Left the session"); tcp_send_line("{\"op\":\"leave\"}"); break;
+  }
+}
+/* Drain the datagram socket and keep the server's view of our address fresh.
+ *
+ * The server can only reach us at the address our own datagrams came from, so
+ * probes continue for the life of the session: they keep a NAT mapping open
+ * and re-register us if it changes. Traffic arriving here is the proof that
+ * the path works in both directions, and its absence is the signal to fall
+ * back to the stream before a single frame is lost to it. */
+static void udp_service(void) {
+  if (np.udp == INVALID_SOCKET) return;
+  DWORD now = GetTickCount();
+  for (int budget = 0; budget < 64; ++budget) {
+    unsigned char datagram[1500];
+    struct sockaddr_in from; socklen_t from_len = sizeof from;
+    int n = (int)recvfrom(np.udp, (char*)datagram, (int)sizeof datagram, 0, (struct sockaddr*)&from, &from_len);
+    if (n <= 0) break;
+    if (from.sin_addr.s_addr != np.udp_addr.sin_addr.s_addr) continue;
+    np.udp_last_rx = now;
+    if (!np.udp_ready) {
+      np.udp_ready = 1;
+      lock(); np.ui.udp_active = 1; unlock();
+      fprintf(stderr, "[netplay] datagram channel confirmed; inputs no longer queue behind the stream\n");
+    }
+    handle_relay(datagram, n);
+  }
+  if (!np.session) return;
+  if (now - np.udp_last_probe >= NP_UDP_PROBE_MS) {
+    np.udp_last_probe = now;
+    if (!np.udp_ready) {
+      /* Registration doubles as the probe: the server records the address the
+       * datagram arrived from and echoes the session's traffic back to it. */
+      unsigned char hello[2] = { PKT_HELLO, (uint8_t)np.local_port };
+      unsigned char packed[sizeof(RelayHeader) + sizeof hello];
+      RelayHeader h = { NP_MAGIC, np.session, (uint16_t)np.local_id, 0 };
+      memcpy(packed, &h, sizeof h);
+      memcpy(packed + sizeof h, hello, sizeof hello);
+      udp_send(packed, sizeof packed);
+    }
+  }
+  if (np.udp_ready && now - np.udp_last_rx > NP_UDP_QUIET_MS) {
+    np.udp_ready = 0;
+    lock(); np.ui.udp_active = 0; unlock();
+    fprintf(stderr, "[netplay] datagram channel went quiet; inputs are back on the stream\n");
   }
 }
 static void auto_step(void) {
@@ -812,14 +1236,15 @@ static DWORD net_thread(LPVOID unused) {
       struct timeval tv = {0, 0};
       int r = select((int)np.tcp + 1, NULL, &w, &e, &tv);
       if (r > 0 && FD_ISSET(np.tcp, &w)) finish_connect();
-      else if ((r > 0 && FD_ISSET(np.tcp, &e)) || now - np.connect_started > 8000) disconnect("Could not reach the server");
+      else if ((r > 0 && FD_ISSET(np.tcp, &e)) || now - np.connect_started > 8000) link_lost("Could not reach the server");
     }
     if (np.connected) {
       if (!np.upgrading && !nm.hello_sent) send_hello();
+      if (!tcp_flush()) { link_lost("Could not send to the server. Please reconnect."); continue; }
       char buffer[4096]; int n = np_recv(np.tcp, buffer, sizeof buffer);
       if (n > 0) {
         if (np.rx_len + (unsigned)n < sizeof np.rx) { memcpy(np.rx + np.rx_len, buffer, (size_t)n); np.rx_len += (unsigned)n; }
-        else { disconnect("Server response exceeded the supported size"); continue; }
+        else { link_lost("Server response exceeded the supported size"); continue; }
         if (np.upgrading) {
           /* Wait for the end of the response headers, then start the protocol. */
           np.rx[np.rx_len < sizeof np.rx ? np.rx_len : sizeof np.rx - 1] = 0;
@@ -827,7 +1252,7 @@ static DWORD net_thread(LPVOID unused) {
           unsigned skip = 4;
           if (!body) { body = strstr(np.rx, "\n\n"); skip = 2; }
           if (!body) continue;
-          if (!strstr(np.rx, " 101")) { disconnect("The server did not accept the connection"); continue; }
+          if (!strstr(np.rx, " 101")) { link_lost("The server did not accept the connection"); continue; }
           unsigned used = (unsigned)(body - np.rx) + skip;
           memmove(np.rx, np.rx + used, np.rx_len - used); np.rx_len -= used;
           np.upgrading = 0;
@@ -845,15 +1270,35 @@ static DWORD net_thread(LPVOID unused) {
           handle_line(line);
           if (!np.connected) break;
         }
-      } else if (n == 0 || (n < 0 && WSAGetLastError() != WSAEWOULDBLOCK)) disconnect("Server connection closed");
-      if (np.connected && nm.hello_sent && now - np.last_ping > 10000) { np.last_ping = now; tcp_send_line("{\"op\":\"ping\"}"); }
+      } else if (n == 0 || (n < 0 && WSAGetLastError() != WSAEWOULDBLOCK)) link_lost("Server connection closed");
+      /* The relay sizes the automatic delay from these. A player can create
+       * a room and start it within a second of connecting, so the first
+       * measurement is taken immediately and reported the moment it lands,
+       * rather than waiting for the next heartbeat. The message is a few
+       * dozen bytes; the heartbeat that follows keeps it current. */
+      if (np.connected && nm.hello_sent) {
+        int carries_measurement = np.ui.ping_ms >= 0 && !np.ping_reported && !np.active;
+        if (carries_measurement || now - np.last_ping > 2000) {
+          char ping[64];
+          if (np.ui.ping_ms >= 0 && !np.active) {
+            snprintf(ping, sizeof ping, "{\"op\":\"ping\",\"rtt\":%d}", np.ui.ping_ms);
+            np.ping_reported = 1;
+          } else snprintf(ping, sizeof ping, "{\"op\":\"ping\"}");
+          np.last_ping = now; tcp_send_line(ping);
+        }
+      }
     }
+    udp_service();
+    if (np.active) ping_peers();
     if (np.armed && !np.active) {
       if (now - np.last_hello > 200) { np.last_hello = now; unsigned char hello[2] = { PKT_HELLO, (uint8_t)np.local_port }; relay_send(hello, sizeof hello, 0); }
       int all = 1; for (int p = 0; p < 4; p++) if (np.port_ids[p] && p != np.local_port && !np.peer_seen[p]) all = 0;
       if (all) { InterlockedExchange(&np.active, 1); InterlockedExchange(&np.start_pending, 1); status("Players connected. Starting..."); }
-      else if (GetTickCount() - np.last_rx > NP_PEER_TIMEOUT_MS) end_session("Could not reach the other players");
+      else if (GetTickCount() - np.last_rx > NP_ARM_TIMEOUT_MS) end_session("Could not reach the other players");
     }
+    /* Peer silence during a match is an interruption, never a verdict: the
+     * grace period in the scene loop is what decides, and it resumes the
+     * instant anything arrives. */
     if (np.active && GetTickCount() - np.last_hello > 500) {
       np.last_hello = GetTickCount();
       unsigned char hello[2] = { PKT_HELLO, (uint8_t)np.local_port };
@@ -862,7 +1307,40 @@ static DWORD net_thread(LPVOID unused) {
     /* handle_relay updates last_rx during this iteration; using the earlier
      * `now` underflows DWORD subtraction and falsely disconnects a live peer. */
     if (np.active && GetTickCount() - np.last_rx > NP_PEER_TIMEOUT_MS) end_session("Connection lost");
-    Sleep(4);
+    /* A peer that said goodbye and never came back has really gone. */
+    if (np.active) for (int p = 0; p < 4; ++p)
+      if (np_peer[p].gone && GetTickCount() - np_peer[p].gone_at > NP_BYE_GRACE_MS) { end_session("Opponent left"); break; }
+    /* Rebuild a lobby connection that dropped under a live match. The session
+     * id, the rollback window and the simulation are all still here, so the
+     * only thing to restore is the socket; the players see the hold and then
+     * the match continues from the frame it stopped on. */
+    if (np.resuming) {
+      DWORD held = GetTickCount() - np.resume_since;
+      /* Once a connection is up, the welcome handler sends `resume` and the
+       * server's reply is what clears this; nothing to do here but wait. */
+      int reconnected = np.connected && nm.hello_sent;
+      if (reconnected) { /* waiting on the server's resume reply */ }
+      else if (held > NP_RECONNECT_GRACE_MS) { np.resuming = 0; end_session("Lost the connection to the server"); }
+      /* Only start a fresh attempt when there is none in flight: a socket
+       * that is connected but still upgrading must be left to finish. */
+      else if (!np.connecting && !np.connected && GetTickCount() - np.reconnect_at >= NP_RECONNECT_BACKOFF_MS) {
+        np.reconnect_at = GetTickCount();
+        lock(); np.ui.reconnecting = 1; unlock();
+        np_interrupt("Reconnecting to the server");
+        start_connect();
+      }
+    }
+    /* One millisecond of granularity: an input handed over by the guest
+     * thread leaves on this pass rather than up to a frame later, and an
+     * arriving packet is picked up as soon as the socket has it. Waiting on
+     * the socket rather than sleeping is what keeps that cheap. */
+    if (np.tcp != INVALID_SOCKET) {
+      fd_set readable; FD_ZERO(&readable); FD_SET(np.tcp, &readable);
+      int highest = (int)np.tcp;
+      if (np.udp != INVALID_SOCKET) { FD_SET(np.udp, &readable); if ((int)np.udp > highest) highest = (int)np.udp; }
+      struct timeval tv = { 0, 1000 };
+      select(highest + 1, &readable, NULL, NULL, &tv);
+    } else Sleep(4);
   }
   return 0;
 }
@@ -920,11 +1398,33 @@ static void restore_rules(Context* ctx) {
   if (valid_guest(prefs, 0x20)) memcpy(ctx->ram + (prefs & RAM_MASK), np.backup_prefs, 0x20);
   np.rules_backed = 0;
 }
-static uint32_t state_hash(Context* ctx) {
+/* Retain compact, non-personal evidence for a confirmed mismatch. Both players'
+ * normal logs then identify the first differing RNG/fighter/input fields. */
+static const uint16_t state_fields[] = { 0x10, 0x14, 0x2C, 0x80, 0x84, 0x88, 0x8C,
+  0xB0, 0xB4, 0xE0, 0xEC, 0x620, 0x624, 0x65C, 0x668, 0x894, 0x89C, 0x1830 };
+#define NP_STATE_FIELDS (sizeof state_fields / sizeof state_fields[0])
+static struct { int epoch; uint32_t frame, seed, present, kind[4], fields[4][NP_STATE_FIELDS]; } state_traces[256];
+static void state_trace_dump(uint32_t frame) {
+  unsigned slot=frame&255;
+  if(state_traces[slot].epoch!=np.epoch||state_traces[slot].frame!=frame)return;
+  fprintf(stderr,"[netplay-desync] epoch=%d frame=%u rng=%08X present=%X\n",np.epoch,frame,state_traces[slot].seed,state_traces[slot].present);
+  for(unsigned p=0;p<4;++p) {
+    const NetInput* input=get_input(p,np.epoch,frame);
+    if(input)fprintf(stderr,"[netplay-desync] P%u input=%04X stick=%d,%d c=%d,%d triggers=%u,%u\n",p,input->buttons,input->sx,input->sy,input->cx,input->cy,input->lt,input->rt);
+    if(!(state_traces[slot].present&(1u<<p)))continue;
+    fprintf(stderr,"[netplay-desync] P%u kind=%u",p,state_traces[slot].kind[p]);
+    for(unsigned i=0;i<NP_STATE_FIELDS;++i)fprintf(stderr," %03X=%08X",state_fields[i],state_traces[slot].fields[p][i]);
+    fprintf(stderr,"\n");
+  }
+}
+static uint32_t state_hash(Context* ctx, uint32_t frame) {
+  unsigned slot=frame&255;
+  memset(&state_traces[slot],0,sizeof state_traces[slot]);
+  state_traces[slot].epoch=np.epoch;state_traces[slot].frame=frame;
   costume_art_frame_done(ctx); /* draw-done already released the FIFO */
   uint32_t h = 2166136261u;
   uint32_t seed_ptr = mem_read32(ctx, RNG_SEED_PTR);
-  if (valid_guest(seed_ptr, 4)) h = fnv(h, mem_read32(ctx, seed_ptr));
+  if (valid_guest(seed_ptr, 4)) { state_traces[slot].seed=mem_read32(ctx, seed_ptr); h = fnv(h, state_traces[slot].seed); }
   for (uint32_t port = 0; port < 4; port++) {
     uint32_t gobj = call_guest(ctx, FN_PLAYER_ENTITY, port);
     if (!valid_guest(gobj, 0x30)) continue;
@@ -932,10 +1432,11 @@ static uint32_t state_hash(Context* ctx) {
     if (!valid_guest(fp, 0x2400)) continue;
     /* Include future-affecting motion and controller state, not only the
      * visible position/damage that can agree for a frame after divergence. */
-    static const uint16_t fields[] = { 0x10, 0x14, 0x2C, 0x80, 0x84, 0x88, 0x8C,
-      0xB0, 0xB4, 0xE0, 0xEC, 0x620, 0x624, 0x65C, 0x668, 0x894, 0x89C, 0x1830 };
-    for (unsigned i = 0; i < sizeof fields / sizeof fields[0]; ++i)
-      h = fnv(h, mem_read32(ctx, fp + fields[i]));
+    state_traces[slot].present|=1u<<port;state_traces[slot].kind[port]=mem_read32(ctx,fp+4);
+    for (unsigned i = 0; i < NP_STATE_FIELDS; ++i) {
+      uint32_t value=mem_read32(ctx,fp+state_fields[i]);
+      state_traces[slot].fields[port][i]=value;h=fnv(h,value);
+    }
   }
   return h;
 }
@@ -960,9 +1461,14 @@ static void epoch_begin(Context* ctx, const char* what) {
   lock();
   np.epoch++; np.frame = 0; np.scene_epoch_ready = 1; np.local_merge_valid = 0; memset(&np.local_merge, 0, sizeof np.local_merge);
   np.hash_valid_from = 0; np.stall_started = 0;
-  np.ui.epoch = np.epoch; np.ui.frame = 0;
+  /* Frames restart at zero here, so the clock comparison starts over with
+   * them; the measured link carries across unchanged. */
+  np.skip_frames = 0;
+  for (int p = 0; p < 4; ++p) { np_peer[p].last_frame = 0; np_peer[p].advantage = np_peer[p].remote_advantage = 0; timesync_new_epoch(&np_peer[p].sync); }
+  np.ui.epoch = np.epoch; np.ui.frame = 0; np.ui.clock_skips = 0; np.ui.frame_advantage = 0;
   rollback_match = !strcmp(what, "match") || !strcmp(what, "sudden death");
   unlock();
+  extern void aurora_link_clear_pad_events(void); aurora_link_clear_pad_events();
   reseed(ctx);
   fprintf(stderr, "[netplay] epoch %d begins at %s\n", np.epoch, what);
 }
@@ -1056,11 +1562,15 @@ void netplay_menu_tick(Context* ctx, int* start_request) {
       return;
     }
     apply_rules(ctx);
-    lock(); np.ui.phase = NETPLAY_PHASE_PLAYING; unlock();
+    lock(); np.ui.phase = NETPLAY_PHASE_PLAYING; np.ui.delay = np.delay; unlock();
     np.epoch = 0; np.frame = 0;
     InterlockedExchange(&np.guest_started, 1);
     *start_request = 1;
-    fprintf(stderr, "[netplay] session %u started as port %d, delay %d\n", np.session, np.local_port + 1, np.delay);
+    { int peer = np_peer_ping(); char link[32];
+      if (peer >= 0) snprintf(link, sizeof link, "%d ms", peer); else snprintf(link, sizeof link, "measuring");
+      fprintf(stderr, "[netplay] session %u started as port %d, delay %d%s, server ping %d ms, peer %s, transport %s\n",
+              np.session, np.local_port + 1, np.delay, np.ui.rules.delay ? "" : " (automatic)",
+              np.ui.ping_ms, link, np.udp_ready ? "datagram" : "stream"); }
   }
 }
 
@@ -1118,15 +1628,17 @@ void netplay_master_status(Context* ctx) {
     for (int p = 0; p < 4; p++) if (np.port_ids[p] && p != np.local_port && f >= (uint32_t)np.delay && !get_input(p, epoch, f)) ready = 0;
     unlock();
     if (ready || !np.active || np.quit) break;
-    DWORD now = GetTickCount();
-    if (now - wait_started > NP_STALL_TIMEOUT_MS) { end_session("Opponent stopped responding"); break; }
+    DWORD now = GetTickCount(), waited = now - wait_started;
+    /* Held, not ended: the menu keeps its place and resumes where it was. */
+    if (waited > NP_STALL_GRACE_MS) { end_session("Opponent stopped responding"); break; }
     if (now - last_request > 40) { last_request = now; unsigned char req[5] = { PKT_REQUEST }; memcpy(req + 1, &f, 4); relay_send(req, sizeof req, 0); send_inputs(f + (uint32_t)np.delay, NP_REDUNDANT); }
     if (!stalled) { stalled = 1; np.stall_started = now; }
-    lock(); np.ui.stalled_ms = (int)(now - wait_started); unlock();
+    if (waited > NP_STALL_NOTICE_MS) np_interrupt("Waiting for opponent");
+    lock(); np.ui.stalled_ms = (int)waited; np.ui.interrupt_ms = (int)np_interrupt_age(); unlock();
     recomp_poll(ctx);
     Sleep(1);
   }
-  if (stalled) { frontend_drop_frame_backlog(); lock(); np.ui.stalled_ms = 0; unlock(); }
+  if (stalled) { frontend_drop_frame_backlog(); lock(); np.ui.stalled_ms = 0; unlock(); np_resume(); }
   if (!np.active) { controller_online_queue(ctx); func_8037750C(ctx); return; }
   /* Publish the agreed inputs as the raw queue entry the original will consume. */
   uint32_t qread = mem_read8(ctx, PADLIB + 1), queue = mem_read32(ctx, PADLIB + 8);
@@ -1144,20 +1656,82 @@ void netplay_master_status(Context* ctx) {
     }
     unlock();
   }
-  uint32_t h = state_hash(ctx);
+  uint32_t h = state_hash(ctx, f);
   lock();
   np.hashes[f & 255] = h; np.frame = f + 1; np.ui.frame = (int)np.frame;
   for (int p = 0; p < 4; p++) if (np.remote_hash_new[p]) {
     np.remote_hash_new[p] = 0;
     uint32_t rf = np.remote_hash_frame[p];
     if (np.remote_hash_epoch[p] == (uint8_t)epoch && rf < np.frame && np.frame - rf < 256 && np.hashes[rf & 255] != np.remote_hash[p] && !np.desynced) {
+      /* Recorded and shown, never acted on. A mismatch means the two games
+       * have stopped agreeing, but ending the match there and then throws
+       * away a game that is usually still perfectly playable, and the players
+       * are better placed than we are to decide whether it still counts. */
       InterlockedExchange(&np.desynced, 1); np.ui.desynced = 1;
       fprintf(stderr, "[netplay] DESYNC at epoch %d frame %u: local %08X remote %08X\n", epoch, rf, np.hashes[rf & 255], np.remote_hash[p]);
+      state_trace_dump(rf);
     }
   }
   unlock();
   if ((f % 60) == 0) fprintf(stderr, "[netplay] epoch %d frame %u hash %08X\n", epoch, f, h);
   controller_online_queue(ctx); func_8037750C(ctx);
+}
+
+/* One simulated frame of clock bookkeeping, called by the scene loop after
+ * the frame is committed.
+ *
+ * Each peer's pair of measurements is recorded every frame, but a correction
+ * is only considered every NP_SYNC_INTERVAL frames: the decision is made from
+ * half a second of averaged evidence, so a single late packet cannot cause a
+ * hitch, and applying it no more often than the evidence refreshes stops the
+ * same drift being paid for twice. Corrections are large only while the match
+ * is settling; after that they are one frame at a time, below perception. */
+static void netplay_clock_tick(void) {
+  if (!np.active) return;
+  int advantage = 0, have = 0, skip = 0;
+  uint32_t frame;
+  lock();
+  frame = np.frame;
+  for (int p = 0; p < 4; ++p) {
+    if (!np.port_ids[p] || p == np.local_port) continue;
+    NetPeer* peer = &np_peer[p];
+    int value = timesync_advantage(&peer->sync, frame, peer->last_frame);
+    peer->advantage = value;
+    timesync_frame(&peer->sync, value, peer->remote_advantage);
+    if (!have || value < advantage) { advantage = value; have = 1; }
+  }
+  np.ui.frame_advantage = have ? advantage : 0;
+  np.ui.rollbacks = (int)rollback.rollback_count;
+  np.ui.rollback_frames = (int)rollback.replayed_frames;
+  np.ui.udp_active = np.udp_ready;
+  { int ping = np_peer_ping(); if (ping >= 0) np.ui.ping_ms = ping; }
+  if (have && frame % NP_SYNC_INTERVAL == 0) {
+    /* Converge quickly while the match is settling, then stay imperceptible. */
+    int most = frame <= 120 ? TS_MAX_SKIP : 1;
+    for (int p = 0; p < 4; ++p) {
+      if (!np.port_ids[p] || p == np.local_port) continue;
+      int value = timesync_skip_frames(&np_peer[p].sync, most);
+      if (value > skip) skip = value;
+    }
+  }
+  unlock();
+  /* A periodic line so a connection can be judged from the log as well as
+   * from the on-screen readout: what the link measures, how far apart the
+   * two clocks are, and how much rollback that is costing. */
+  if (frame && frame % 300 == 0) {
+    lock();
+    int ping = np.ui.ping_ms, held = np.ui.clock_skips, udp = np.ui.udp_active;
+    unsigned corrections = rollback.rollback_count, replayed = rollback.replayed_frames;
+    unlock();
+    fprintf(stderr, "[netplay] link: peer %d ms, advantage %+d, corrections %u (%u frames replayed),"
+                    " clock holds %d, transport %s\n",
+            ping, advantage, corrections, replayed, held, udp ? "datagram" : "stream");
+  }
+  if (skip > 0) {
+    np.skip_frames = skip;
+    fprintf(stderr, "[netplay] clock: giving back %d frame(s) at frame %u (advantage %d)\n",
+            skip, frame, advantage);
+  }
 }
 
 #include "netplay_rollback.inc"

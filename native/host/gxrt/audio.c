@@ -29,7 +29,9 @@ void frontend_service_audio(Context* ctx) {
     extern int aurora_link_audio(const int16_t*,uint32_t,uint32_t);
     if (!ctx || pumping || !(ctx->msr&0x8000u)) return;
     extern uint64_t frontend_guest_timebase(void);
-    uint64_t now=frontend_guest_timebase();
+    uint64_t now;
+    extern int netplay_audio_clock(uint64_t*);
+    if (!netplay_audio_clock(&now)) now=frontend_guest_timebase();
     if (!(g_adma.control&DOL_AUDIO_DMA_ENABLE)) { last_tick=now;fractional=0;return; }
     if (!last_tick) { last_tick=now;return; }
     uint64_t elapsed=now-last_tick;
@@ -113,6 +115,10 @@ size_t frontend_audio_snapshot(void* data, int restore) {
   return offset;
 }
 
-void frontend_audio_rebase(uint64_t clock) { last_tick = clock; fractional = 0; }
+void frontend_audio_rebase(uint64_t clock) {
+    last_tick = clock; fractional = 0;
+    extern void aurora_link_audio_reset(void);
+    aurora_link_audio_reset();
+}
 
 void frontend_audio_release(void){if(capture){fclose(capture);capture=NULL;}}

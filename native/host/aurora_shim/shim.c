@@ -500,6 +500,10 @@ AUSHIM_API int aushim_poll_pad(uint32_t port, AushimPadStatus* out_status)
     if (!aushim_netplay_keyboard_captured())
 #endif
         aushim_controller_keyboard_fallback(port, out_status);
+    /* The single place a pad becomes what the game sees: the L/R click that
+     * Melee needs for an air dodge is decided here, from this port's own
+     * settings, for both real shoulders and keyboard bindings. */
+    aushim_controller_triggers(port, out_status);
     if (!aushim_controller_tap_jump(port)) out_status->buttons |= YAMPP_PAD_TAP_JUMP_OFF;
     if (aushim_controllers_capturing() || aushim_profile_capturing()) {
         /* Host UI consumes navigation; C-stick still moves the native camera. */
@@ -615,6 +619,11 @@ static void audio_observe_push(uint32_t frames) {
         fflush(s_audio_stats);s_audio_max_gap=0;s_audio_stats_next=now+500000000;
     }
 }
+/* Presentation audio is never part of a rollback snapshot. Scene/clock
+ * transitions discard stale output instead of carrying a delay into menus. */
+AUSHIM_API void aushim_audio_reset(void) {
+    if(s_audio_stream) SDL_ClearAudioStream(s_audio_stream);
+}
 AUSHIM_API int aushim_audio_push(const int16_t* samples, uint32_t frames, uint32_t rate) {
     if (!s_initialized || !samples || !frames) return 0;
     if(!s_audio_stats_checked){
@@ -637,6 +646,12 @@ AUSHIM_API int aushim_audio_push(const int16_t* samples, uint32_t frames, uint32
 #ifdef AUSHIM_SETTINGS
     SDL_SetAudioStreamGain(s_audio_stream,aushim_settings_gain());
 #endif
+    /* Keep recent audio after a stall instead of playing an old backlog. */
+    uint32_t maximum=rate/12u; /* about 83 ms of stereo input */
+    if(frames>maximum) { samples+=(frames-maximum)*2; frames=maximum; }
+    int queued=SDL_GetAudioStreamQueued(s_audio_stream);
+    if(queued>0 && (uint64_t)queued+(uint64_t)frames*4>(uint64_t)maximum*4)
+        SDL_ClearAudioStream(s_audio_stream);
     audio_observe_push(frames);
     return SDL_PutAudioStreamData(s_audio_stream,samples,(int)(frames*4))?1:0;
 }
