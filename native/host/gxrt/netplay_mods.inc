@@ -354,8 +354,9 @@ static void nm_spawn_missing(const wchar_t* what, const wchar_t* where) {
   /* Recorded rather than shown here: every caller reports its own failure
    * afterwards, and a generic "could not start" would otherwise bury the one
    * detail the player can act on. */
-  snprintf(nm.spawn_reason, sizeof nm.spawn_reason,
-           "Installation is incomplete. Extract the whole download again, then retry.");
+  static const char incomplete[] =
+      "Installation is incomplete. Extract the whole download again, then retry.";
+  snprintf(nm.spawn_reason, sizeof nm.spawn_reason, "%s", incomplete);
 }
 static int nm_spawn(int job, const char* hash, int enabled) {
   wchar_t python[MAX_PATH], script[MAX_PATH], folder[MAX_PATH], log_path[MAX_PATH], command[2048];
