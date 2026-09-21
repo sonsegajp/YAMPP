@@ -199,7 +199,14 @@ static void apply_menu_foreground(Context* ctx, unsigned kind, int modal) {
 
 static uint32_t area_alloc(uint32_t size) {
   size = (size + 31u) & ~31u;
-  if (!area_base || area_used + size > area_size) return 0;
+  if (!area_base || area_used + size > area_size) {
+    /* Callers degrade by skipping their artwork, which is silent. The area
+     * is sized close to what the menus actually use so the remainder stays
+     * with the guest heap, so say something if it ever wants more. */
+    static int warned;
+    if (!warned) { warned = 1; fprintf(stderr, "[hooks] host menu area exhausted: %u of %u bytes used, wanted %u more\n", area_used, area_size, size); }
+    return 0;
+  }
   uint32_t at = area_base + area_used;
   area_used += size;
   memset(area_ctx->ram + (at & RAM_MASK), 0, size);
