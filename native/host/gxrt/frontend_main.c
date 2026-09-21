@@ -690,13 +690,16 @@ int main(int argc, char** argv)
              * that heap and does not give it back when you return to the
              * menus -- they share one scene -- so whatever is reserved here
              * is missing from every menu opened afterwards. Reserving 256 KB
-             * for a measured 26 KB of use was enough to make the item switch
-             * screen fail its first allocation and panic.
+             * for it was enough to make the item switch screen fail its
+             * first allocation and panic.
              *
-             * 64 KB leaves well over twice the measured use; area_alloc warns
-             * rather than failing silently if that is ever not enough. */
-            u32 host_area = (boot_thread - 0x10000u) & ~31u;
-            { extern void hooks_init(Context*, uint32_t, uint32_t); hooks_init(&s_cpu, host_area, 0x10000u); }
+             * Measured peak across the whole menu set, Online included, is
+             * 69,152 bytes; the Online labels are most of it, so a figure
+             * taken before that screen is opened badly understates it.
+             * 96 KB leaves about 40% headroom, and area_alloc warns rather
+             * than failing silently if that is ever not enough. */
+            u32 host_area = (boot_thread - 0x18000u) & ~31u;
+            { extern void hooks_init(Context*, uint32_t, uint32_t); hooks_init(&s_cpu, host_area, 0x18000u); }
             u32 costume_area = (host_area - 0x28000u) & ~31u;
             { extern void costumes_initialize(Context*,uint32_t,unsigned); costumes_initialize(&s_cpu,costume_area,0x28000u); }
             mem_write32(&s_cpu, 0x80000034u, costume_area);
