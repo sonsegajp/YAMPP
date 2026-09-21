@@ -546,11 +546,25 @@ void mod_confirmation(Canvas& c,const MeleeNetplayUi& ui,int first) {
     c.text(400,187,18,white,"Add Akaneia fighters, stages and music.",536,true);
     c.text(400,222,17,gold,"Official GitHub: akaneia/akaneia-build",536,true);
     c.text(400,254,16,white,"Version "+std::string(ui.mod_required[0].version)+"  |  "+download_size(ui.mod_required[0].bytes),536,true);
-    c.paragraph(130,293,16,muted,joining?"Download from official GitHub and join? YAMPP will prepare the content and continue.":"Place Akaneia.Builder.1.0.1.7z in user/imports, then install. YAMPP does not bundle Akaneia.",535,3,22);
-    c.text(400,379,15,muted,"Your original Melee files stay separate.",536,true);
+    if(downloading) {
+      /* Preparing Akaneia patches a disc image, extracts it, imports the
+       * content and verifies the result: minutes of work behind one screen.
+       * Without a position the player cannot tell it apart from a hang, and
+       * the stage name is what makes a long pause legible rather than
+       * alarming. Both come from the importer itself. */
+      const int percent=std::clamp(ui.mod_progress,0,100);
+      c.paragraph(130,290,16,white,public_status(ui.mod_status,"Preparing verified Akaneia content..."),535,2,22);
+      c.box(130,346,540,6,IM_COL32(37,51,70,255),3);
+      c.box(130,346,540*percent/100.f,6,gold,3);
+      c.text(400,362,15,gold,number(percent)+"%",536,true);
+      c.text(400,385,14,muted,"This takes several minutes. Leaving now cancels it.",536,true);
+    } else {
+      c.paragraph(130,293,16,muted,joining?"Download from official GitHub and join? YAMPP will prepare the content and continue.":"Place Akaneia.Builder.1.0.1.7z in user/imports, then install. YAMPP does not bundle Akaneia.",535,3,22);
+      c.text(400,379,15,muted,"Your original Melee files stay separate.",536,true);
+    }
     prompt_strip(c,downloading?std::initializer_list<Prompt>{{"B","Cancel"}}:
                                    std::initializer_list<Prompt>{{"A",joining?"Download":"Install"},{"B","Cancel"}});
-    footer(c,downloading?"Preparing verified Akaneia content...":joining?"Download Akaneia from official GitHub?":"Install the official archive from user/imports.");
+    footer(c,downloading?public_status(ui.mod_status,"Preparing verified Akaneia content..."):joining?"Download Akaneia from official GitHub?":"Install the official archive from user/imports.");
     return;
   }
   for(int i=0;i<count;i++) bytes+=std::max(0,ui.mod_required[i].bytes);
