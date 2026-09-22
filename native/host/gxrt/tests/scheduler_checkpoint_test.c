@@ -34,11 +34,26 @@ static void parked_thread(int state, uint32_t queue) {
     frontend_thread_checkpoint(checkpoint);
     CHECK(frontend_thread_checkpoint_matches(checkpoint));
 }
+/* The mutation is real -- the checkpoint no longer matches -- and a restore
+ * puts it back rather than giving up. That distinction is the whole point:
+ * every one of these happens during an ordinary match, a retrace wake on every
+ * single video frame, and refusing to rewind them left the simulation running
+ * on inputs that had already been corrected everywhere else. */
 static void changed_without_switch(void) {
+    HThread before = s_th[1];
     CHECK(g_sched_switches == 0);
     CHECK(s_cur == 0);
     CHECK(!frontend_thread_checkpoint_matches(checkpoint));
-    /* Validation must leave the newly changed scheduler state intact. */
+    CHECK(frontend_thread_checkpoint_restore(checkpoint));
+    CHECK(frontend_thread_checkpoint_matches(checkpoint));
+    /* Restoring puts back the bookkeeping and nothing else: the wait handle,
+     * the guest thread it stands for and its entry point are identities, not
+     * state, and a restore that changed one would be describing a different
+     * thread. */
+    CHECK(s_th[1].run == before.run && s_th[1].osthread == before.osthread
+          && s_th[1].entry == before.entry && s_th[1].active_ctx == before.active_ctx);
+    /* Leave the caller looking at the mutated state it set up, as before. */
+    s_th[1] = before;
     frontend_thread_checkpoint(checkpoint);
     CHECK(frontend_thread_checkpoint_matches(checkpoint));
     ++cases;
@@ -96,8 +111,31 @@ int main(void) {
     changed_without_switch();
     s_th[1].sleep_q++;
     changed_without_switch();
+    /* A thread that actually ran has a native call stack no snapshot reaches,
+     * so this one is still refused. */
     g_sched_switches++;
     CHECK(!frontend_thread_checkpoint_matches(checkpoint));
+    CHECK(!frontend_thread_checkpoint_restore(checkpoint));
+    g_sched_switches--;
+    ++cases;
+
+    /* So is a thread that has appeared or gone since the snapshot. */
+    parked_thread(TS_READY, 0);
+    s_th[1].used = 0;
+    CHECK(!frontend_thread_checkpoint_restore(checkpoint));
+    s_th[1].used = 1;
+    CHECK(frontend_thread_checkpoint_restore(checkpoint));
+    ++cases;
+
+    /* A different thread reusing the slot is not the same thread, however
+     * closely its bookkeeping matches. */
+    s_th[1].osthread ^= 0x1000u;
+    CHECK(!frontend_thread_checkpoint_restore(checkpoint));
+    s_th[1].osthread ^= 0x1000u;
+    s_th[1].entry ^= 0x1000u;
+    CHECK(!frontend_thread_checkpoint_restore(checkpoint));
+    s_th[1].entry ^= 0x1000u;
+    CHECK(frontend_thread_checkpoint_restore(checkpoint));
     ++cases;
 
 #ifdef _WIN32
@@ -108,6 +146,7 @@ int main(void) {
     DeleteCriticalSection(&s_lock);
     free(checkpoint);
     free(cpu.ram);
-    printf("scheduler checkpoint: %u mutation/identity cases passed; non-switching resume, suspend, wakeup and retrace wake rejected\n", cases);
+    printf("scheduler checkpoint: %u cases passed; non-switching resume, suspend, wakeup and"
+           " retrace wake are rewound, an actual switch and a changed thread set are refused\n", cases);
     return 0;
 }

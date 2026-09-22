@@ -245,6 +245,9 @@ void costumes_poll(Context *ctx){
  if(requested){char csv[sizeof requested_hashes];memcpy(csv,requested_hashes,sizeof csv);int ok=activate(ctx,requested_local,csv);InterlockedExchange(&requested,0);InterlockedExchange(&readiness,ok?1:-1);}
  ReleaseSRWLockExclusive(&request_lock);
 }
+/* How much of the guest arena this module holds, for the diagnostic that
+ * reports a failed guest allocation. */
+unsigned costume_area_bytes(void){return reserved_size;}
 void costumes_initialize(Context *ctx,uint32_t area,unsigned size){
  if(size<CKINDS*CCOLORS*(24u+string_stride)||!valid(area,size))return;
  table_area=area;reserved_size=size;

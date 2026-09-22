@@ -75,6 +75,8 @@ static void (*p_settings_netplay)(char*,unsigned,char*,unsigned) = NULL;
 static void (*p_settings_set_netplay)(const char*,const char*) = NULL;
 static void (*p_netplay_bind)(void*) = NULL;
 static void (*p_netplay_menu)(void) = NULL;
+static int  (*p_display_refresh)(void) = NULL;
+static void (*p_set_vsync)(int) = NULL;
 static void (*p_music_bar)(const char*,int) = NULL;
 static void (*p_music_draw)(void) = NULL;
 static void (*p_table)(const void*,int,int) = NULL;
@@ -82,6 +84,9 @@ static void (*p_table_draw)(void) = NULL;
 static void (*p_netplay_screen)(const MeleeNetplayUi*,int,int) = NULL;
 
 /* Now-playing bar shown when a stage track starts. */
+/* The display's refresh rate in hundredths of a hertz, 0 when unknown. */
+int aurora_link_display_refresh(void) { return p_display_refresh ? p_display_refresh() : 0; }
+void aurora_link_set_vsync(int enabled) { if (p_set_vsync) p_set_vsync(enabled); }
 int aurora_link_music_bar(const char* text, int custom) { if (!p_music_bar) return 0; p_music_bar(text, custom); return 1; }
 
 /* Widescreen setting owned by the renderer settings; -1 when unavailable. */
@@ -150,6 +155,8 @@ int aurora_link_init(void* mem1_base, uint32_t mem1_size, unsigned w, unsigned h
     p_settings_set_netplay = (void(*)(const char*,const char*))GetProcAddress(s_dll, "aushim_settings_set_netplay");
     p_netplay_bind = (void(*)(void*))GetProcAddress(s_dll, "aushim_netplay_bind");
     p_netplay_menu = (void(*)(void))GetProcAddress(s_dll, "aushim_netplay_menu");
+    p_display_refresh = (int(*)(void))GetProcAddress(s_dll, "aushim_display_refresh_hz");
+    p_set_vsync = (void(*)(int))GetProcAddress(s_dll, "aushim_set_vsync");
     p_music_bar = (void(*)(const char*,int))GetProcAddress(s_dll, "aushim_music_bar");
     p_music_draw = (void(*)(void))GetProcAddress(s_dll, "aushim_music_draw");
     p_table = (void(*)(const void*,int,int))GetProcAddress(s_dll, "aushim_netplay_table");

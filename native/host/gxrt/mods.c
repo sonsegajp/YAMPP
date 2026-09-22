@@ -212,9 +212,12 @@ void mods_trace(uint32_t addr,Context* ctx) {
   /* Offline capture fixture for m-ex's 16-bit external stage IDs. The native
    * SSS exit still preloads the stage, sound bank and playlist normally. */
   if(addr==0x8025BB5C){
+   /* Applies during a session as well. Stage select is a synchronized scene,
+    * so both peers reach this point on the same frame and write the same
+    * value; a run that sets it on only one side would desync, which is why it
+    * is a MELEE_TEST_ variable the harness sets for both clients. */
    const char* text=getenv("MELEE_TEST_STAGE_EXTERNAL");
-   extern int netplay_session_active(void);
-   if(text&&*text&&!netplay_session_active()){
+   if(text&&*text){
     char* end=NULL;long stage=strtol(text,&end,10);uint32_t sss=mem_read32(ctx,0x804D6C90u);
     if(end&&!*end&&stage>=0&&stage<=65535&&valid(sss,0x140)&&mem_read8(ctx,0x804D6CAFu)==2){
      mem_write16(ctx,sss+0x1e,(uint16_t)stage);

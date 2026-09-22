@@ -13,9 +13,9 @@ import time
 import unittest
 
 from melee_netplay_server import (
-    Client, DEFAULT_RULES, HEADER, MAGIC, MAX_AUTO_DELAY, MIN_AUTO_DELAY, PKT_BYE,
-    PROTOCOL_VERSION, SYNC_ENGINE, UDP_PACKETS_PER_SECOND, UDP_TOKEN_CHARS, Server,
-    automatic_delay, clean_rules,
+    CLIENT_RELEASE, Client, DEFAULT_RULES, HEADER, MAGIC, MAX_AUTO_DELAY, MIN_AUTO_DELAY,
+    PKT_BYE, PROTOCOL_VERSION, SYNC_ENGINE, UDP_PACKETS_PER_SECOND, UDP_TOKEN_CHARS, Server,
+    automatic_delay, clean_endpoint, clean_rules,
 )
 
 
@@ -415,6 +415,106 @@ class AutomaticDelayTests(unittest.TestCase):
             self.assertIsNone(client.rtt_ms)
         server.handle(client, {"op": "ping", "rtt": 44})
         self.assertEqual(client.rtt_ms, 44)
+
+
+class DirectPaths(unittest.TestCase):
+    """Rooms stay here; the match traffic does not have to.
+
+    The server's part is small and entirely about trust: it is the only party
+    that knows both players are in the same session, so it is the only one that
+    can hand each of them the other's address and a token that makes a datagram
+    from a stranger's address believable.
+    """
+
+    def session(self, addresses=(("203.0.113.7", 4001), ("198.51.100.9", 4002))):
+        server = Server()
+        clients = []
+        for index, name in enumerate(("Host", "Guest")):
+            client = Client(server, None, RecordingWriter())
+            client.name = name
+            server.clients[client.id] = client
+            server.handle(client, {"op": "hello", "name": name,
+                                   "version": PROTOCOL_VERSION, "sync": SYNC_ENGINE})
+            if addresses[index] is not None:
+                client.udp_addr = addresses[index]
+            clients.append(client)
+        host, guest = clients
+        server.handle(host, {"op": "create", "name": "Room", "max": 2, "rules": dict(DEFAULT_RULES)})
+        server.handle(guest, {"op": "join", "room": host.room.id})
+        for client in clients:
+            server.handle(client, {"op": "ready", "ready": 1})
+        server.handle(host, {"op": "start"})
+        return server, host, guest
+
+    def announcements(self, client):
+        return [m for m in client.writer.messages if m["op"] == "peers"]
+
+    def test_each_player_is_told_where_the_other_is(self):
+        _, host, guest = self.session()
+        told = self.announcements(host)[-1]
+        self.assertEqual(told["peers"][0]["id"], guest.id)
+        self.assertEqual(told["peers"][0]["addr"], "198.51.100.9:4002")
+        other = self.announcements(guest)[-1]
+        self.assertEqual(other["peers"][0]["addr"], "203.0.113.7:4001")
+
+    def test_a_player_is_never_given_its_own_token_to_send_with(self):
+        """The token a client presents is the recipient's, not its own.
+
+        That is what makes it an authenticator: holding it proves the server
+        put you in a session with the holder, and a client that could send
+        using its own token would be able to forge traffic to itself.
+        """
+        _, host, guest = self.session()
+        told = self.announcements(host)[-1]
+        self.assertEqual(told["token"], host.peer_token)
+        self.assertEqual(told["peers"][0]["token"], guest.peer_token)
+        self.assertNotEqual(host.peer_token, guest.peer_token)
+
+    def test_a_new_session_issues_new_tokens(self):
+        """Leaving a match ends the right to send straight to the other player."""
+        server, host, guest = self.session()
+        before = (host.peer_token, guest.peer_token)
+        server.end_session(host.room, "A player ended the session")
+        for client in (host, guest):
+            server.handle(client, {"op": "ready", "ready": 1})
+        server.handle(host, {"op": "start"})
+        after = (host.peer_token, guest.peer_token)
+        self.assertNotEqual(before[0], after[0])
+        self.assertNotEqual(before[1], after[1])
+        # And the new tokens are the ones the players were actually given.
+        self.assertEqual(self.announcements(host)[-1]["token"], host.peer_token)
+        self.assertEqual(self.announcements(host)[-1]["peers"][0]["token"], guest.peer_token)
+
+    def test_a_player_whose_address_is_unknown_is_left_out(self):
+        """Not every client gets a datagram through, and that is not an error.
+
+        It simply has no address to publish yet, so the other player keeps
+        using the relay for it and is told later if one appears.
+        """
+        _, host, guest = self.session(addresses=(("203.0.113.7", 4001), None))
+        self.assertEqual(self.announcements(host), [])
+        self.assertEqual(self.announcements(guest)[-1]["peers"][0]["addr"], "203.0.113.7:4001")
+
+    def test_a_private_address_is_offered_as_a_second_candidate(self):
+        """Two players behind one router reach each other here and nowhere else."""
+        server, host, guest = self.session()
+        server.handle(guest, {"op": "ping", "local": "192.168.1.20:50000"})
+        told = self.announcements(host)[-1]
+        self.assertEqual(told["peers"][0]["local"], "192.168.1.20:50000")
+
+    def test_a_private_address_that_is_not_an_address_is_refused(self):
+        """It is forwarded to another machine, so it is checked, not trusted."""
+        server, host, guest = self.session()
+        for bad in ("example.com:7420", "1.2.3:70", "1.2.3.4", "1.2.3.4:0",
+                    "999.1.1.1:80", "1.2.3.4:70000", "x" * 64):
+            server.handle(guest, {"op": "ping", "local": bad})
+            self.assertIsNone(guest.local_addr, bad)
+        for good in ("192.168.1.20:50000", "10.0.0.1:1"):
+            self.assertEqual(clean_endpoint(good), good)
+
+    def test_the_release_the_server_expects_is_a_bare_version(self):
+        """A launcher pastes it into a pinned URL, so it may only be a version."""
+        self.assertRegex(CLIENT_RELEASE, r"^[0-9]+\.[0-9]+\.[0-9]+$")
 
 
 if __name__ == "__main__":

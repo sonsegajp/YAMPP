@@ -26,7 +26,26 @@ def free_port():
         return s.getsockname()[1]
 
 
-def launch(name, out, port, role, script, frames, capture, input_delay=3, mods=None, fast_exit=False, widescreen=0, endpoint=None, room_name="localtest", compare_scalar_batch=False, capture_interval=30):
+def content_plan(out):
+    """Boot inputs for whatever content is currently enabled, or None.
+
+    Produced by the same helper the real launcher uses, so a run here boots the
+    disc, executable and file table a player with that content enabled would
+    boot -- rather than a hand-assembled approximation of one.
+    """
+    plan = (out / 'content-plan.env').resolve()
+    plan.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run([sys.executable, str(ROOT / 'scripts/prepare_content_runtime.py'),
+                    '--output', str(plan)], cwd=ROOT, check=True)
+    values = {}
+    for line in plan.read_text(encoding='utf-8').splitlines():
+        key, _, value = line.partition(chr(9))
+        if value:
+            values[key] = value
+    return values if values.get('MELEE_MEX_BASE_DOL') else None
+
+
+def launch(name, out, port, role, script, frames, capture, input_delay=3, mods=None, fast_exit=False, widescreen=0, endpoint=None, room_name="localtest", compare_scalar_batch=False, capture_interval=30, relay_only=False, content=None):
     cfg = configuration()
     env = os.environ.copy()
     for key in list(env):
@@ -37,6 +56,21 @@ def launch(name, out, port, role, script, frames, capture, input_delay=3, mods=N
                GCN_AURORA_DATA_DIR=str(out / 'cache'), MELEE_MEMORY_CARD=str(out / 'card.raw'), MELEE_SETTINGS=str(out / 'settings.xml'),
                MELEE_INPUT=BOOT, MELEE_NETPLAY_SERVER=endpoint or ('127.0.0.1:%d' % port), MELEE_NETPLAY_NAME=name,
                MELEE_NETPLAY_AUTO='%s:%s' % (role,room_name), MELEE_NETPLAY_INPUT=script, MELEE_NETPLAY_RULES='"stock":3,"minutes":0,"items":0,"delay":%d' % input_delay)
+    if relay_only:
+        env['MELEE_NETPLAY_RELAY_ONLY'] = '1'
+    if content:
+        # Applied after the stock defaults above, which name the base disc.
+        for key in ('MELEE_DISC', 'MELEE_FST', 'MELEE_RUNTIME_DOL',
+                    'MELEE_MEX_BASE_DOL', 'MELEE_UNICORN_LIBRARY', 'MELEE_MOD_REGISTRY'):
+            if content.get(key):
+                env[key] = content[key]
+        # The additive-costume system stands down entirely while m-ex content is
+        # loaded, so a room that waits for costume activation waits forever and
+        # cancels its own entry. A player with content enabled is given an empty
+        # registry for the same reason; match it rather than a test sandbox.
+        for key in ('MELEE_COSTUME_REGISTRY', 'MELEE_WORKSHOP_TEST_MODS',
+                    'MELEE_MOD_REPOSITORY_URL'):
+            env.pop(key, None)
     if mods:
         env.update(MELEE_WORKSHOP_TEST_MODS=str(mods),MELEE_COSTUME_REGISTRY=str(mods/'costumes.tsv'),MELEE_MOD_REGISTRY=str(mods/'registry.tsv'),MELEE_MOD_REPOSITORY_URL='http://127.0.0.1:%d/api/mods'%port)
     env['MELEE_TEST_MENU']='10:0'
@@ -47,6 +81,9 @@ def launch(name, out, port, role, script, frames, capture, input_delay=3, mods=N
     (out / 'settings.xml').write_text('<?xml version="1.0" encoding="utf-8"?>\n<melee-settings schema="1" width="%d" height="720" renderScale="1" widescreen="%d" fullscreen="0" vsync="0" volume="100" mute="1" showFps="0" />' % (1280 if widescreen else 960, widescreen))
     if os.environ.get('MELEE_NETPLAY_TEST_STAGE'):
         env['MELEE_TEST_STAGE'] = os.environ['MELEE_NETPLAY_TEST_STAGE']
+    # Set for both clients, which is what keeps the two stage selects agreeing.
+    if os.environ.get('MELEE_NETPLAY_TEST_STAGE_EXTERNAL'):
+        env['MELEE_TEST_STAGE_EXTERNAL'] = os.environ['MELEE_NETPLAY_TEST_STAGE_EXTERNAL']
     if os.environ.get('MELEE_NETPLAY_TEST_AUDIO') == '1':
         env['MELEE_AUDIO_STATS'] = str(out/'audio-stats.csv')
         env['MELEE_AUDIO_CAPTURE'] = str(out/'audio.pcm')
@@ -61,6 +98,12 @@ def launch(name, out, port, role, script, frames, capture, input_delay=3, mods=N
     log = (out / 'run.log').open('w')
     exe = Path(os.environ.get('MELEE_TEST_EXE', str(ROOT / 'build/native-game/melee-mod.exe')))
     dol = project_path(cfg["assets"]["directory"]) / "sys/main.dol"
+    # Content mods replace the executable as well as the disc. Booting the
+    # stock one against a content disc starts the game, and even brings up
+    # the dynamic engine, but m-ex's own data root never exists -- so the
+    # costume tables never bind and room entry cancels itself.
+    if content and content.get("MELEE_RUNTIME_DOL"):
+        dol = Path(content["MELEE_RUNTIME_DOL"])
     content = os.environ.get("MELEE_NETPLAY_TEST_CONTENT")
     if content:
         sys.path.insert(0,str(ROOT/"tools/modkit"))
@@ -112,6 +155,11 @@ def analyse(path):
         'rollback_enabled': '[netplay] rollback enabled:' in text,
         'rollbacks': len(re.findall(r'\[netplay\] rollback frame \d+ -> \d+', text)),
         'cancelled_to_menu': '[netplay] canceled scene; returning to the netplay menu' in text,
+        'direct': '[netplay] direct path to port' in text,
+        'custom_music': re.findall(r'\[music\] track \S+ \S+ -> custom[^:]*: (.+)', text),
+        'external_stage': [int(v) for v in re.findall(r'\[stage-test\] native SSS selected external stage (\d+)', text)],
+        'dynamic_engine': '[mex-runtime] Dynamic upstream execution enabled' in text,
+        'tracked_snapshots': '[rollback] tracked snapshots:' in text,
         'ended': re.findall(r'\[netplay\] Session ended: (.*)', text),
         'assertions': re.findall(r'^.*assertion .*failed.*$', text, re.MULTILINE),
         'hashes': hashes,
@@ -134,6 +182,29 @@ def main():
     parser.add_argument('--fast-exit', action='store_true', help='Skip known renderer DLL-detach fault after card flush and readback; gameplay checks remain unchanged')
     parser.add_argument('--input-delay', type=int, choices=range(0, 11), default=3,
                         help='0 lets each peer pick its own delay from the measured round trip')
+    parser.add_argument('--content', action='store_true',
+                        help='Boot whatever content mod is enabled in user/content-mods.json, '
+                             'so rollback is checked on the m-ex path as well as the stock disc')
+    parser.add_argument('--stage', type=int,
+                        help='Pin a stock versus stage by its 8-bit id')
+    parser.add_argument('--external-stage', type=int,
+                        help="Pin a stage by m-ex's 16-bit external id, which is how a stage "
+                             'that content added is named. Requires --content.')
+    parser.add_argument('--host-music', type=Path,
+                        help='Audio file to install as the host\'s own stage music. The guest does '
+                             'not get it, so the run checks that two players hearing different '
+                             'things still simulate identical frames.')
+    parser.add_argument('--join-music', type=Path,
+                        help="Same, for the guest.")
+    parser.add_argument('--music-track',
+                        help='Track the custom audio replaces, as its file stem or display name '
+                             '(the game looks for a folder of that name). Required with --host-music '
+                             'or --join-music.')
+    parser.add_argument('--relay-only', action='store_true',
+                        help='Keep both clients on the server path. Implied by the impairment options, '
+                             'which impair the server and would otherwise measure a path nobody is using.')
+    parser.add_argument('--require-direct', action='store_true',
+                        help='Require both clients to reach each other without the server')
     parser.add_argument('--relay-delay-ms', type=int, default=0)
     parser.add_argument('--relay-jitter-ms', type=int, default=0)
     parser.add_argument('--relay-stall-ms', type=int, default=0)
@@ -183,6 +254,20 @@ def main():
         if metadata['sha256']!=args.costume_package:raise ValueError('Repository returned a different costume package')
     if args.server and (args.relay_delay_ms or args.relay_jitter_ms or args.relay_stall_ms or args.costume_package):
         parser.error('External checks do not host an impairment proxy or costume repository')
+    # Impairing the relay only measures something while the clients are
+    # still using it.
+    relay_only = args.relay_only or bool(args.relay_delay_ms or args.relay_jitter_ms or args.relay_stall_ms)
+    if relay_only and args.require_direct:
+        parser.error('--require-direct cannot be combined with --relay-only or the relay impairment options')
+    content = content_plan(out) if args.content else None
+    if args.content and content is None:
+        parser.error('No content mod is enabled; enable one in user/content-mods.json first')
+    if args.stage is not None:
+        os.environ['MELEE_NETPLAY_TEST_STAGE'] = str(args.stage)
+    if args.external_stage is not None:
+        if not args.content:
+            parser.error('--external-stage names a stage that content added; pass --content')
+        os.environ['MELEE_NETPLAY_TEST_STAGE_EXTERNAL'] = str(args.external_stage)
     port = free_port()
     server_log = (out / 'server.log').open('w')
     server = None if args.server else subprocess.Popen([sys.executable, str(ROOT / 'scripts/netplay_test_server.py'),
@@ -215,9 +300,21 @@ def main():
             else:
                 if any(mods.iterdir()):raise ValueError('Vanilla tests require a new empty isolated mods folder')
                 subprocess.run([sys.executable,'-c','import sys;sys.path.insert(0,"tools/modkit");from catalog import runtime_registry;runtime_registry()'],cwd=ROOT,env=setup,check=True)
-        host, host_log = launch('Host', out / 'host', port, 'host', args.host_input, args.frames, args.capture, args.input_delay, sandbox/'host', args.fast_exit, args.host_widescreen, args.server, args.room_name if args.server else 'localtest',args.compare_scalar_batch,args.capture_interval)
+        for role, source in (('host', args.host_music), ('join', args.join_music)):
+            if source is None:
+                continue
+            if not source.is_file():
+                parser.error('No such audio file: %s' % source)
+            if not args.music_track:
+                parser.error('--host-music/--join-music need --music-track')
+            folder = sandbox / role / 'music' / 'stage' / args.music_track
+            folder.mkdir(parents=True, exist_ok=True)
+            import shutil as _shutil
+            _shutil.copy2(source, folder / source.name)
+            print('installed %s music: %s' % (role, source.name))
+        host, host_log = launch('Host', out / 'host', port, 'host', args.host_input, args.frames, args.capture, args.input_delay, sandbox/'host', args.fast_exit, args.host_widescreen, args.server, args.room_name if args.server else 'localtest',args.compare_scalar_batch,args.capture_interval,relay_only,content)
         time.sleep(2.0)
-        join, join_log = launch('Guest', out / 'join', port, 'join', args.join_input, args.frames, args.capture, args.input_delay, sandbox/'join', args.fast_exit, args.join_widescreen, args.server, args.room_name if args.server else 'localtest',args.compare_scalar_batch,args.capture_interval)
+        join, join_log = launch('Guest', out / 'join', port, 'join', args.join_input, args.frames, args.capture, args.input_delay, sandbox/'join', args.fast_exit, args.join_widescreen, args.server, args.room_name if args.server else 'localtest',args.compare_scalar_batch,args.capture_interval,relay_only,content)
         deadline = time.monotonic() + timeout
         for process in (host, join):
             try:
@@ -245,6 +342,10 @@ def main():
     match_compared = sum(e in match_epochs for e, f in common)
     require_rollback = args.require_rollback or bool(args.relay_delay_ms or args.relay_jitter_ms or args.relay_stall_ms)
     impairment_exercised = 'Injected latency:' in (out / 'server.log').read_text(errors='replace')
+    if relay_only:
+        # The impairment lives in the relay, so a run that measures it has to
+        # be a run that still goes through the relay.
+        impairment_exercised = impairment_exercised and not a['direct'] and not b['direct']
     expected_endings = {'Shutdown', 'Opponent left', 'Server ended the session'}
     unexpected_endings = [reason for peer in (a, b) for reason in peer['ended'] if reason not in expected_endings]
     report = {
@@ -267,6 +368,14 @@ def main():
         'input_delay': args.input_delay, 'relay_delay_ms': args.relay_delay_ms,
         'relay_jitter_ms': args.relay_jitter_ms, 'require_rollback': require_rollback,
         'impairment_exercised': impairment_exercised,
+        'relay_only': relay_only,
+        'direct_paths': [a['direct'], b['direct']],
+        'tracked_snapshots': [a['tracked_snapshots'], b['tracked_snapshots']],
+        'content': bool(content),
+        'content_disc': content.get('MELEE_DISC') if content else None,
+        'dynamic_engine': [a['dynamic_engine'], b['dynamic_engine']],
+        'custom_music': [a['custom_music'], b['custom_music']],
+        'external_stage': [a['external_stage'], b['external_stage']],
         'reached_match': bool(match_epoch) and any(e[1].strip() == 'match' for e in b['epochs']),
     }
     report['passed'] = (not timed_out and not report['premature_exit'] and host.returncode == 0 and join.returncode == 0 and a['started'] and b['started']
@@ -276,7 +385,15 @@ def main():
                         and not a['assertions'] and not b['assertions'] and match_compared >= 20
                         and (not require_rollback or (a['rollback_enabled'] and b['rollback_enabled']
                              and a['rollbacks'] + b['rollbacks'] > 0))
-                        and (not (args.relay_delay_ms or args.relay_jitter_ms or args.relay_stall_ms) or impairment_exercised))
+                        and (not (args.relay_delay_ms or args.relay_jitter_ms or args.relay_stall_ms) or impairment_exercised)
+                        and (not args.require_direct or (a['direct'] and b['direct']))
+                        and (not args.content or (a['dynamic_engine'] and b['dynamic_engine']))
+                        and (args.host_music is None or bool(a['custom_music']))
+                        and (args.join_music is None or bool(b['custom_music']))
+                        and (args.external_stage is None
+                             or (a['external_stage'] and b['external_stage']
+                                 and set(a['external_stage']) == {args.external_stage}
+                                 and set(b['external_stage']) == {args.external_stage})))
     report['renderOverlapComparison']=os.environ.get('MELEE_NETPLAY_TEST_COMPARE_RENDER')=='1'
     report['scalarBatchComparison']=args.compare_scalar_batch
     report['relay_stall_ms']=args.relay_stall_ms

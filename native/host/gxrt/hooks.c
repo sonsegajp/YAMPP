@@ -2186,10 +2186,32 @@ static void hook_init_registers(Context* ctx) {
 }
 
 extern RecFn controller_gameplay_lookup(uint32_t);
+/* HSD_MemAlloc (0x8037F1E4). The original asserts on a null result and stops
+ * the game there, which is what a player sees as a freeze with no explanation:
+ * a menu that will not open, a mode that will not continue to its next stage.
+ *
+ * The runtime reserves part of the guest arena for its own menu artwork and
+ * costume data, so when this happens the first question is always whether that
+ * reservation is why. Print the request and the reservation together so the
+ * answer is in the log rather than in an investigation. */
+extern void func_8037F1E4(Context*);
+extern unsigned costume_area_bytes(void);
+static void hook_hsd_memalloc(Context* ctx) {
+  uint32_t size = ctx->gpr[3];
+  func_8037F1E4(ctx);
+  if (ctx->gpr[3]) return;
+  static int reported;
+  if (reported++ < 8)
+    fprintf(stderr, "[heap] the game could not allocate %u bytes and will stop here."
+                    " Host reservation: %u bytes for menus (%u used), %u for costumes.\n",
+            size, area_size, area_used, costume_area_bytes());
+}
+
 RecFn hooks_lookup(uint32_t addr) {
   RecFn control = controller_gameplay_lookup(addr); if (control) return control;
   RecFn art = costume_art_lookup(addr); if (art) return art;
   switch (addr) {
+  case 0x8037F1E4u: return hook_hsd_memalloc;
   case 0x80005340u: return hook_init_registers;
   case 0x8015ED8Cu: return hook_unlocked_characters;
   case 0x8015EDA4u: return hook_unlocked_stages;

@@ -87,6 +87,18 @@ extern int aurora_link_aspect_lock(int command);
 #define NP_UDP_PROBE_MS 200
 #define NP_UDP_QUIET_MS 1500     /* UDP considered lost; fall back to TCP */
 #define NP_UDP_TOKEN 32
+/* Hole punching. Both players send to each other's observed address at the
+ * same time; whichever direction opens first carries the reply that proves
+ * the other. Probes continue for the life of the session to hold the mapping
+ * open, at a rate a NAT will not mistake for a flood. */
+#define NP_PUNCH_MS 250
+/* A direct path that has gone this long without a packet is abandoned and its
+ * peer goes back through the relay, which is always still there. */
+#define NP_DIRECT_QUIET_MS 2000
+/* One public address as the server observed it, one private address the peer
+ * reported: the second is what lets two players on the same network reach
+ * each other without leaving it. */
+#define NP_CANDIDATES 2
 #define NP_MAGIC 0x4D4C4E50u   /* 'MLNP' */
 #define NP_DEFAULT_PORT 7420
 /* The public hostname is safe to distribute. Deployment-specific routing is
@@ -143,6 +155,16 @@ typedef struct NetPeer {
   uint32_t ping_tick;
   int ping_outstanding;
   int gone; DWORD gone_at;    /* PKT_BYE seen; they may still be reconnecting */
+  /* The direct path to this player. `token` is what their client expects to
+   * see in front of a datagram we send it -- issued by the server, known only
+   * to the two of us, and the only thing that makes a datagram from an
+   * unknown address believable. */
+  char token[NP_UDP_TOKEN + 1];
+  struct sockaddr_in candidate[NP_CANDIDATES];
+  int candidates;
+  struct sockaddr_in direct_addr;
+  int direct_ok;
+  DWORD direct_rx, direct_probe;
 } NetPeer;
 static NetPeer np_peer[4];
 
@@ -195,6 +217,19 @@ static struct {
   SOCKET udp; struct sockaddr_in udp_addr;
   int udp_offered, udp_ready; DWORD udp_last_rx, udp_last_probe;
   char udp_token[NP_UDP_TOKEN + 1];
+  /* The direct path. One socket serves both routes: the relay answers from
+   * its own address with no token in front, a player answers from theirs with
+   * our token in front, and the two are never confused for each other.
+   * `peer_token` is ours -- what we require on a datagram claiming to be from
+   * a player. `local_udp` is this machine's own address on its network, which
+   * the server passes to the other player as a second thing to try. */
+  char peer_token[NP_UDP_TOKEN + 1];
+  char local_udp[64];
+  int direct_peers;
+  /* Set once at startup. Off means every packet keeps going through the
+   * server, which costs the extra hop and keeps this machine's address
+   * between it and the server. */
+  int allow_direct;
   /* Session continuity. An interruption holds the match; it does not end it. */
   volatile LONG interrupted;
   DWORD interrupt_since; char interrupt_why[96];
@@ -558,6 +593,48 @@ static void udp_send(const void* payload, unsigned len) {
   }
   LeaveCriticalSection(&np.send_lock);
 }
+/* "1.2.3.4:5678" as the server wrote it. Numeric only: a peer address is
+ * never a name to look up, and refusing to resolve one keeps a hostile entry
+ * from turning into a DNS query. */
+static int parse_endpoint(const char* text, struct sockaddr_in* out) {
+  unsigned a, b, c, d, port;
+  char tail;
+  if (!text || !*text) return 0;
+  if (sscanf(text, "%u.%u.%u.%u:%u%c", &a, &b, &c, &d, &port, &tail) != 5) return 0;
+  if (a > 255 || b > 255 || c > 255 || d > 255 || port == 0 || port > 65535) return 0;
+  memset(out, 0, sizeof *out);
+  out->sin_family = AF_INET;
+  out->sin_port = htons((unsigned short)port);
+  { unsigned char* bytes = (unsigned char*)&out->sin_addr;
+    bytes[0] = (unsigned char)a; bytes[1] = (unsigned char)b;
+    bytes[2] = (unsigned char)c; bytes[3] = (unsigned char)d; }
+  return 1;
+}
+/* Which guest port belongs to a lobby client id, or -1. */
+static int port_of_id(uint16_t id) {
+  for (int p = 0; p < 4; ++p) if (np.port_ids[p] == (int)id) return p;
+  return -1;
+}
+/* One already-packed relay frame, straight to a player. The token in front is
+ * theirs, which is how their client knows the datagram came from someone the
+ * server put in this session with them. */
+static void direct_send_to(const struct sockaddr_in* where, const char* token,
+                           const void* packed, unsigned len) {
+  EnterCriticalSection(&np.send_lock);
+  if (np.udp != INVALID_SOCKET && token[0] && len + NP_UDP_TOKEN <= 1500) {
+    unsigned char datagram[1500];
+    memcpy(datagram, token, NP_UDP_TOKEN);
+    memcpy(datagram + NP_UDP_TOKEN, packed, len);
+    sendto(np.udp, (const char*)datagram, (int)(len + NP_UDP_TOKEN), 0,
+           (const struct sockaddr*)where, sizeof *where);
+  }
+  LeaveCriticalSection(&np.send_lock);
+}
+/* Send to every addressed peer, preferring the direct path where one exists.
+ *
+ * The relay copy is only made when some addressed peer still needs it, so a
+ * match where both paths opened stops touching the server entirely, and a
+ * match where only one did keeps paying for only that one. */
 static void relay_send(const void* payload, unsigned len, uint16_t to) {
   if (!np.connected || !np.session) return;
   unsigned char buffer[1400];
@@ -565,6 +642,18 @@ static void relay_send(const void* payload, unsigned len, uint16_t to) {
   RelayHeader h = { NP_MAGIC, np.session, (uint16_t)np.local_id, to };
   memcpy(buffer, &h, sizeof h); memcpy(buffer + sizeof h, payload, len);
   unsigned packed = len + (unsigned)sizeof h;
+  { int addressed = 0, through_relay = 0;
+    for (int p = 0; p < 4; ++p) {
+      if (!np.port_ids[p] || p == np.local_port) continue;
+      if (to && (uint16_t)np.port_ids[p] != to) continue;
+      addressed = 1;
+      if (np_peer[p].direct_ok) direct_send_to(&np_peer[p].direct_addr, np_peer[p].token, buffer, packed);
+      else through_relay = 1;
+    }
+    /* Before the player list exists there is nobody to address directly, and
+     * the packet still has to reach the server. */
+    if (addressed && !through_relay) return;
+  }
   if (np.udp != INVALID_SOCKET) {
     udp_send(buffer, packed);
     /* Once the datagram path has proven itself the stream copy is dropped:
@@ -583,7 +672,11 @@ static void udp_close(void) {
   if (np.udp != INVALID_SOCKET) { closesocket(np.udp); np.udp = INVALID_SOCKET; }
   np.udp_ready = np.udp_offered = 0; np.udp_token[0] = 0;
   LeaveCriticalSection(&np.send_lock);
-  lock(); np.ui.udp_active = 0; unlock();
+  /* The socket the punched mappings belonged to is gone, so the paths are
+   * too; they are re-proven on the new one. */
+  for (int p = 0; p < 4; ++p) { np_peer[p].direct_ok = 0; np_peer[p].candidates = 0; }
+  np.direct_peers = 0;
+  lock(); np.ui.udp_active = 0; np.ui.direct_peers = 0; unlock();
 }
 /* Open the side channel the server advertised. Failure is not an error: the
  * stream path stays in place and nothing about the match changes. */
@@ -606,6 +699,31 @@ static void udp_open(const char* token, int port) {
   memcpy(np.udp_token, token, NP_UDP_TOKEN); np.udp_token[NP_UDP_TOKEN] = 0;
   LeaveCriticalSection(&np.send_lock);
   np.udp_offered = 1; np.udp_last_rx = np.udp_last_probe = GetTickCount();
+  /* Bind now rather than on the first send, so the port is known and can be
+   * offered to the other player while the session is still being set up. */
+  { struct sockaddr_in any; memset(&any, 0, sizeof any);
+    any.sin_family = AF_INET; any.sin_addr.s_addr = htonl(INADDR_ANY); any.sin_port = 0;
+    bind(np.udp, (struct sockaddr*)&any, sizeof any); }
+  np.local_udp[0] = 0;
+  { /* The address this machine uses to reach the server is the one its own
+     * network knows it by. A connected datagram socket reports it without
+     * sending anything, and enumerating every interface would only produce
+     * candidates that cannot route. */
+    struct sockaddr_in mine; socklen_t mine_len = sizeof mine;
+    SOCKET probe = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (probe != INVALID_SOCKET) {
+      if (!connect(probe, (struct sockaddr*)&np.udp_addr, sizeof np.udp_addr)
+          && !getsockname(probe, (struct sockaddr*)&mine, &mine_len)) {
+        struct sockaddr_in bound; socklen_t bound_len = sizeof bound;
+        if (!getsockname(np.udp, (struct sockaddr*)&bound, &bound_len) && bound.sin_port) {
+          unsigned char* a = (unsigned char*)&mine.sin_addr;
+          snprintf(np.local_udp, sizeof np.local_udp, "%u.%u.%u.%u:%u",
+                   a[0], a[1], a[2], a[3], (unsigned)ntohs(bound.sin_port));
+        }
+      }
+      closesocket(probe);
+    }
+  }
   fprintf(stderr, "[netplay] datagram channel offered on port %d\n", port);
 }
 static void close_sockets(void) {
@@ -628,6 +746,8 @@ static void end_session(const char* why) {
   np.session = 0;
   lock(); np.ui.session_active = 0; np.ui.phase = np.connected ? (np.ui.room_id ? NETPLAY_PHASE_ROOM : NETPLAY_PHASE_LOBBY) : NETPLAY_PHASE_OFFLINE; unlock();
   memset(np_peer, 0, sizeof np_peer);
+  np.peer_token[0] = 0; np.direct_peers = 0;
+  lock(); np.ui.direct_peers = 0; unlock();
   InterlockedExchange(&np.interrupted, 0); np.interrupt_why[0] = 0; np.skip_frames = 0;
   np.resuming = 0;
   lock(); np.ui.interrupted = 0; np.ui.interrupt_ms = 0; np.ui.interrupt_text[0] = 0;
@@ -986,6 +1106,32 @@ static void handle_line(const char* line) {
     np_resume();
     status("Rejoined the match");
     fprintf(stderr, "[netplay] rejoined session %u as id %d\n", np.session, np.local_id);
+  } else if (!strcmp(op, "peers")) {
+    /* Where the other players can be reached, and the tokens that make a
+     * datagram from them believable. The server is the only thing that knows
+     * both, which is what keeps the addresses out of reach of anyone who is
+     * not in this session. */
+    if ((uint32_t)json_int(line, "session", 0) != np.session || !np.session) return;
+    json_str(line, "token", np.peer_token, sizeof np.peer_token);
+    const char* cursor = json_find(line, "peers"); const char* entry;
+    while (cursor && (entry = json_next(&cursor))) {
+      int id = (int)json_int(entry, "id", 0);
+      int port = port_of_id((uint16_t)id);
+      if (port < 0 || port == np.local_port) continue;
+      NetPeer* peer = &np_peer[port];
+      char token[NP_UDP_TOKEN + 8]; json_str(entry, "token", token, sizeof token);
+      if (strlen(token) != NP_UDP_TOKEN) continue;
+      memcpy(peer->token, token, NP_UDP_TOKEN); peer->token[NP_UDP_TOKEN] = 0;
+      char address[64];
+      int found = 0;
+      json_str(entry, "addr", address, sizeof address);
+      if (parse_endpoint(address, &peer->candidate[found])) ++found;
+      json_str(entry, "local", address, sizeof address);
+      if (found < NP_CANDIDATES && parse_endpoint(address, &peer->candidate[found])) ++found;
+      peer->candidates = found;
+      peer->direct_probe = 0;       /* probe on the next service, not in 250 ms */
+      if (found) fprintf(stderr, "[netplay] port %d has %d address(es) to try directly\n", port, found);
+    }
   } else if (!strcmp(op, "ended")) {
     end_session("Server ended the session");
   }
@@ -1156,6 +1302,56 @@ static void process_command(void) {
  * and re-register us if it changes. Traffic arriving here is the proof that
  * the path works in both directions, and its absence is the signal to fall
  * back to the stream before a single frame is lost to it. */
+/* A datagram that arrived with our own token in front of it came from a
+ * player the server put in this session with us. The address it came from is
+ * where that player is actually reachable -- which is not necessarily any of
+ * the addresses we were told to try, because a NAT rewrites the port -- so it
+ * replaces the candidate we had, and their traffic goes there from now on. */
+static void direct_received(int port, const struct sockaddr_in* from, DWORD now) {
+  NetPeer* peer = &np_peer[port];
+  int moved = peer->direct_addr.sin_addr.s_addr != from->sin_addr.s_addr
+           || peer->direct_addr.sin_port != from->sin_port;
+  peer->direct_addr = *from;
+  peer->direct_rx = now;
+  if (!peer->direct_ok || moved) {
+    unsigned char* a = (unsigned char*)&from->sin_addr;
+    if (!peer->direct_ok) {
+      peer->direct_ok = 1;
+      lock(); ++np.direct_peers; np.ui.direct_peers = np.direct_peers; unlock();
+      fprintf(stderr, "[netplay] direct path to port %d open at %u.%u.%u.%u:%u;"
+                      " their inputs no longer go through the server\n",
+              port, a[0], a[1], a[2], a[3], (unsigned)ntohs(from->sin_port));
+    } else {
+      fprintf(stderr, "[netplay] direct path to port %d moved to %u.%u.%u.%u:%u\n",
+              port, a[0], a[1], a[2], a[3], (unsigned)ntohs(from->sin_port));
+    }
+  }
+}
+/* Send the same registration packet to every address a peer might answer on.
+ * Both players do this at once, which is what opens the two mappings: the
+ * first packet out of each NAT is dropped by the other, and the second gets
+ * through the hole the first one made. */
+static void punch_peers(DWORD now) {
+  if (!np.allow_direct) return;
+  for (int p = 0; p < 4; ++p) {
+    if (!np.port_ids[p] || p == np.local_port) continue;
+    NetPeer* peer = &np_peer[p];
+    if (!peer->candidates || !peer->token[0]) continue;
+    if (peer->direct_ok && now - peer->direct_rx <= NP_DIRECT_QUIET_MS) continue;
+    if (now - peer->direct_probe < NP_PUNCH_MS) continue;
+    peer->direct_probe = now;
+    unsigned char hello[2] = { PKT_HELLO, (uint8_t)np.local_port };
+    unsigned char packed[sizeof(RelayHeader) + sizeof hello];
+    RelayHeader h = { NP_MAGIC, np.session, (uint16_t)np.local_id, (uint16_t)np.port_ids[p] };
+    memcpy(packed, &h, sizeof h);
+    memcpy(packed + sizeof h, hello, sizeof hello);
+    /* A path already proven is probed at its own address, which is the one
+     * the mapping belongs to; an unproven one is probed everywhere. */
+    if (peer->direct_ok) direct_send_to(&peer->direct_addr, peer->token, packed, sizeof packed);
+    else for (int c = 0; c < peer->candidates; ++c)
+      direct_send_to(&peer->candidate[c], peer->token, packed, sizeof packed);
+  }
+}
 static void udp_service(void) {
   if (np.udp == INVALID_SOCKET) return;
   DWORD now = GetTickCount();
@@ -1164,6 +1360,20 @@ static void udp_service(void) {
     struct sockaddr_in from; socklen_t from_len = sizeof from;
     int n = (int)recvfrom(np.udp, (char*)datagram, (int)sizeof datagram, 0, (struct sockaddr*)&from, &from_len);
     if (n <= 0) break;
+    /* Our own token in front means a player sent this straight to us. The
+     * token is what decides, never the source address: a NAT gives no warning
+     * before renumbering a mapping, and an address alone proves nothing. */
+    if (np.allow_direct && np.peer_token[0] && n >= (int)(NP_UDP_TOKEN + sizeof(RelayHeader))
+        && !memcmp(datagram, np.peer_token, NP_UDP_TOKEN)) {
+      RelayHeader h; memcpy(&h, datagram + NP_UDP_TOKEN, sizeof h);
+      if (h.magic != NP_MAGIC || h.session != np.session || !np.session) continue;
+      int port = port_of_id(h.from);
+      if (port < 0 || port == np.local_port) continue;
+      direct_received(port, &from, now);
+      np.last_rx = now;
+      handle_relay(datagram + NP_UDP_TOKEN, n - (int)NP_UDP_TOKEN);
+      continue;
+    }
     if (from.sin_addr.s_addr != np.udp_addr.sin_addr.s_addr) continue;
     np.udp_last_rx = now;
     if (!np.udp_ready) {
@@ -1174,6 +1384,17 @@ static void udp_service(void) {
     handle_relay(datagram, n);
   }
   if (!np.session) return;
+  /* A direct path that stopped answering is dropped rather than waited on.
+   * The relay never went away, so falling back to it costs the hop and
+   * nothing else. */
+  for (int p = 0; p < 4; ++p) {
+    NetPeer* peer = &np_peer[p];
+    if (!peer->direct_ok || now - peer->direct_rx <= NP_DIRECT_QUIET_MS) continue;
+    peer->direct_ok = 0;
+    lock(); if (np.direct_peers) --np.direct_peers; np.ui.direct_peers = np.direct_peers; unlock();
+    fprintf(stderr, "[netplay] direct path to port %d went quiet; back through the server\n", p);
+  }
+  punch_peers(now);
   if (now - np.udp_last_probe >= NP_UDP_PROBE_MS) {
     np.udp_last_probe = now;
     if (!np.udp_ready) {
@@ -1279,11 +1500,17 @@ static DWORD net_thread(LPVOID unused) {
       if (np.connected && nm.hello_sent) {
         int carries_measurement = np.ui.ping_ms >= 0 && !np.ping_reported && !np.active;
         if (carries_measurement || now - np.last_ping > 2000) {
-          char ping[64];
+          char ping[160];
+          /* The private address rides along with the heartbeat rather than
+           * getting a message of its own: the server needs it before a room
+           * starts, and this is already the thing that arrives before one. */
+          char local[80] = "";
+          if (np.allow_direct && np.local_udp[0])
+            snprintf(local, sizeof local, ",\"local\":\"%s\"", np.local_udp);
           if (np.ui.ping_ms >= 0 && !np.active) {
-            snprintf(ping, sizeof ping, "{\"op\":\"ping\",\"rtt\":%d}", np.ui.ping_ms);
+            snprintf(ping, sizeof ping, "{\"op\":\"ping\",\"rtt\":%d%s}", np.ui.ping_ms, local);
             np.ping_reported = 1;
-          } else snprintf(ping, sizeof ping, "{\"op\":\"ping\"}");
+          } else snprintf(ping, sizeof ping, "{\"op\":\"ping\"%s}", local);
           np.last_ping = now; tcp_send_line(ping);
         }
       }
@@ -1721,11 +1948,13 @@ static void netplay_clock_tick(void) {
   if (frame && frame % 300 == 0) {
     lock();
     int ping = np.ui.ping_ms, held = np.ui.clock_skips, udp = np.ui.udp_active;
+    int direct = np.ui.direct_peers;
     unsigned corrections = rollback.rollback_count, replayed = rollback.replayed_frames;
     unlock();
     fprintf(stderr, "[netplay] link: peer %d ms, advantage %+d, corrections %u (%u frames replayed),"
                     " clock holds %d, transport %s\n",
-            ping, advantage, corrections, replayed, held, udp ? "datagram" : "stream");
+            ping, advantage, corrections, replayed, held,
+            direct ? "direct" : udp ? "relayed datagram" : "relayed stream");
   }
   if (skip > 0) {
     np.skip_frames = skip;
@@ -1753,6 +1982,11 @@ void netplay_init(void) {
      on this machine, which no longer exists, so they are moved across too. */
   if (!np.ui.server[0] || !strcmp(np.ui.server, "127.0.0.1:7420") || !strcmp(np.ui.server, "localhost:7420"))
     snprintf(np.ui.server, sizeof np.ui.server, "%s", official_server());
+  /* Direct paths are the default; MELEE_NETPLAY_RELAY_ONLY=1 keeps every
+   * packet on the server. */
+  { const char* relay_only = getenv("MELEE_NETPLAY_RELAY_ONLY");
+    np.allow_direct = !(relay_only && relay_only[0] == '1');
+    if (!np.allow_direct) fprintf(stderr, "[netplay] direct connections disabled; matches stay on the server\n"); }
   env = getenv("MELEE_NETPLAY_AUTO");
   if (env && (!strncmp(env, "host:", 5) || !strncmp(env, "join:", 5))) { np.auto_mode = 1; np.auto_host = env[0] == 'h'; snprintf(np.pending_room, sizeof np.pending_room, "%s", env + 5); }
   env = getenv("MELEE_NETPLAY_RULES");

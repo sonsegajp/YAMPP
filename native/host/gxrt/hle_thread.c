@@ -584,6 +584,82 @@ int frontend_thread_checkpoint_matches(const void* data)
     return memcmp(&current, data, sizeof current) == 0;
 }
 
+/* Put the scheduler back the way the snapshot found it, or report that it
+ * cannot be done.
+ *
+ * A memory snapshot cannot rewind a native call stack, so the question is
+ * whether any of them moved. This scheduler is cooperative: exactly one thread
+ * runs at a time and every other one is parked inside sched_yield_locked, so a
+ * thread's stack can only have moved if it was handed control -- and every
+ * hand-off increments g_sched_switches. An unchanged switch count is therefore
+ * proof that every parked continuation is exactly where the snapshot left it.
+ *
+ * What can still differ is bookkeeping the running thread changed by itself: a
+ * thread resumed, suspended, or woken from a queue. Those are plain fields,
+ * they describe the simulation being rewound, and putting them back is what
+ * rewinding means. None of them touches a wait handle -- an event is only
+ * signalled immediately before a switch -- so restoring them cannot leave a
+ * thread's recorded state disagreeing with what it is actually waiting on.
+ *
+ * This used to refuse instead, and that was the more dangerous choice.
+ * hle_thread_wake_retrace moves a sleeper to ready on every single video
+ * frame, so during a match the refusal was not the rare case, it was most of
+ * them. A refused correction is not a skipped optimisation: this machine has
+ * already simulated frames on predicted inputs that turned out to be wrong,
+ * and declining to replay them leaves it permanently disagreeing with its
+ * opponent, with nothing left that would ever fix it. Content that streams
+ * more -- more fighters, more stages, more music -- wakes those threads more
+ * often and so diverged sooner, which is the shape of the reports.
+ *
+ * A thread appearing or disappearing is still refused. There is no native
+ * stack to restore for a thread that did not exist when the snapshot was
+ * taken, and none to take away from one that has since exited.
+ */
+int frontend_thread_checkpoint_restore(const void* data)
+{
+    SchedulerCheckpoint saved;
+    int ok = 1;
+    memcpy(&saved, data, sizeof saved);
+    if (s_inited) EnterCriticalSection(&s_lock);
+    if (saved.initialized != s_inited || saved.current != s_cur
+        || saved.switches != g_sched_switches)
+        ok = 0;
+    for (int i = 0; ok && i < MAXTH; ++i) {
+        const ThreadCheckpoint* was = &saved.threads[i];
+        const HThread* now = &s_th[i];
+        uintptr_t handle;
+        if (was->used != now->used) { ok = 0; break; }
+        if (!was->used) continue;
+#ifdef _WIN32
+        handle = (uintptr_t)now->handle;
+#else
+        handle = (uintptr_t)now->pthread;
+#endif
+        /* Identities, not state: the same thread, still waiting on the same
+         * handle, still running the same guest entry point. */
+        if (was->handle != handle || was->run != (uintptr_t)now->run
+            || was->active_ctx != (uintptr_t)now->active_ctx
+            || was->osthread != now->osthread || was->entry != now->entry)
+            ok = 0;
+    }
+    if (ok) {
+        for (int i = 0; i < MAXTH; ++i) {
+            const ThreadCheckpoint* was = &saved.threads[i];
+            HThread* thread = &s_th[i];
+            if (!was->used) continue;
+            thread->priority = was->priority;
+            thread->state = was->state;
+            thread->arg = was->arg;
+            thread->sleep_q = was->sleep_q;
+            /* No switch has happened, so a parked context cannot have moved.
+             * Copying it back is a no-op that says so. */
+            if (i != s_cur) thread->ctx = was->parked_ctx;
+        }
+    }
+    if (s_inited) LeaveCriticalSection(&s_lock);
+    return ok;
+}
+
 void hle_thread_release(void) {
  if(!s_inited)return;
  for(unsigned i=0;i<MAXTH;i++) {

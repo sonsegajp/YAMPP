@@ -6,7 +6,7 @@
 #define MELEE_NETPLAY_UI_H
 #include <stdint.h>
 
-#define NETPLAY_UI_VERSION 7u
+#define NETPLAY_UI_VERSION 8u
 #define NETPLAY_MAX_MODS 16
 #define NETPLAY_MOD_CATALOG 64
 #define NETPLAY_MAX_ROOMS 32
@@ -90,6 +90,7 @@ typedef struct MeleeNetplayUi {
   char interrupt_text[96];
   /* Transport and clock diagnostics, for the in-match overlay. */
   int32_t udp_active;         /* 1 while inputs take the unreliable path */
+  int32_t direct_peers;       /* players reached without the server in between */
   int32_t rollback_frames;    /* frames replayed over the last second */
   int32_t rollbacks;          /* corrections over the last second */
   int32_t clock_skips;        /* frames given back to hold the peers level */

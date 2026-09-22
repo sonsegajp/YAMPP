@@ -760,6 +760,38 @@ int main(int argc, char** argv)
      * count means the guest is genuinely wedged with no calls at all, a
      * climbing one means it is looping and the recorded frontier is misleading.
      * One run separates those. */
+    /* Frame pacing.
+     *
+     * The guest's video clock is 59.94 Hz -- 60000/1001, the real NTSC rate --
+     * and nothing here changes that. Melee counts its logic, its timers and
+     * its music in those frames, so the simulation runs at that rate on every
+     * machine, and what the display does with the finished frames is a
+     * separate question with a different answer per panel:
+     *
+     *   - A panel refreshing at about the same rate cannot absorb a blocking
+     *     present. A frame that overruns by a millisecond waits for the next
+     *     refresh and costs a whole frame instead, which is how a 17 ms frame
+     *     was once measured at 46 ms. Those panels keep the unsynchronised
+     *     path, where a late frame costs only the time it was late by.
+     *   - A faster panel has nothing to lose: the wait for the next of 144
+     *     refreshes is 7 ms at worst, and tearing goes away. On a
+     *     variable-refresh panel there is no wait at all, because the display
+     *     refreshes when the frame arrives -- which is what actually makes a
+     *     60 Hz game look right on a 144 Hz monitor.
+     *
+     * GCN_AURORA_VSYNC forces either answer.
+     */
+    extern int aurora_link_display_refresh(void);
+    extern void aurora_link_set_vsync(int);
+    int refresh_hundredths = aurora_link_display_refresh();
+    int synchronised = refresh_hundredths > 6100;
+    aurora_link_set_vsync(synchronised);
+    if (refresh_hundredths)
+        printf("display: %d.%02d Hz, guest 59.94 Hz, presentation %s\n",
+               refresh_hundredths / 100, refresh_hundredths % 100,
+               synchronised ? "synchronised to the display" : "unsynchronised");
+    else
+        printf("display: refresh rate unknown, guest 59.94 Hz, presentation unsynchronised\n");
     LARGE_INTEGER pace_freq, pace_start;
     QueryPerformanceFrequency(&pace_freq);
     QueryPerformanceCounter(&pace_start);
@@ -873,7 +905,11 @@ render_ready_frame: ;
          * starved in wall-clock terms, which is the same failure the
          * VIWaitForRetrace HLE already documents for its own path. */
         /* Rendering is part of the 16.67 ms budget, not an extra delay. */
-        LONGLONG deadline=pace_start.QuadPart+(pace_freq.QuadPart*(i+1))/60;
+        /* 60000/1001 Hz. Pacing at a flat 60 ran the game a tenth of a
+         * percent fast and put a slow beat against every display, which is
+         * seen as one hitch every several seconds even when nothing is
+         * wrong. */
+        LONGLONG deadline=pace_start.QuadPart+(pace_freq.QuadPart*(i+1)*1001)/60000;
         LARGE_INTEGER pace_now;
         for (;;) {
             QueryPerformanceCounter(&pace_now);
@@ -886,7 +922,7 @@ render_ready_frame: ;
             if (aurora_link_quit_requested() || s_term_requested) { left = 0; break; }
         }
         if (pace_now.QuadPart-deadline>pace_freq.QuadPart/4)
-            pace_start.QuadPart=pace_now.QuadPart-(pace_freq.QuadPart*(i+1))/60;
+            pace_start.QuadPart=pace_now.QuadPart-(pace_freq.QuadPart*(i+1)*1001)/60000;
         if ((i % 60) == 59)
             printf("  [%3d] calls=%ld distinct=%ld dvdreads=%ld last_fn=0x%08X present=%llu\n",
                    i + 1, g_call_count, g_distinct_fns, g_hle_dvd_reads, g_last_fn,

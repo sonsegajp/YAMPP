@@ -7,6 +7,11 @@
 #include <string.h>
 #include <math.h>
 
+/* native/host/gxrt/pagedelta.h; declared rather than included because the
+ * vendor tree is compiled without the host include path. */
+extern void* pd_alloc(size_t size);
+extern void pd_free(void* base, size_t size);
+
 #if defined(_MSC_VER)
 #include <intrin.h>
 #else
@@ -17,7 +22,12 @@ bool cpu_init(CPUState* cpu) {
     memset(cpu, 0, sizeof(*cpu));
 
     cpu->ram_size = GC_MAIN_RAM_SIZE;
-    cpu->ram = (u8*)calloc(1, cpu->ram_size);
+    /* Reserved through the snapshot layer rather than calloc: rollback copies
+     * this region every simulated frame, and only a reservation the hardware
+     * can report writes against lets it copy just the pages that changed.
+     * pd_alloc falls back to an ordinary zeroed reservation when tracking is
+     * unavailable, so nothing here depends on getting it. */
+    cpu->ram = (u8*)pd_alloc(cpu->ram_size);
     if (!cpu->ram) {
         fprintf(stderr, "error: failed to allocate %u bytes for RAM\n", cpu->ram_size);
         return false;
@@ -48,7 +58,7 @@ bool cpu_alloc_mem2(CPUState* cpu, u32 size) {
 
 void cpu_free(CPUState* cpu) {
     if (cpu->ram) {
-        free(cpu->ram);
+        pd_free(cpu->ram, cpu->ram_size);
         cpu->ram = NULL;
     }
     if (cpu->mem2) {

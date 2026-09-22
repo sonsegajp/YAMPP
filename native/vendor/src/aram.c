@@ -3,19 +3,31 @@
 // window [ARAM_BASE, ARAM_BASE + ARAM_SIZE). See aram.h.
 #include "gxruntime/aram.h"
 
+#include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
 
 static u8* g_aram = NULL;
 
+/* native/host/gxrt/pagedelta.h; see the note in core/cpu.c. */
+extern void* pd_alloc(size_t size);
+extern void pd_free(void* base, size_t size);
+
 void aram_init(void) {
     if (!g_aram)
-        g_aram = (u8*)calloc(1, ARAM_SIZE);
+        g_aram = (u8*)pd_alloc(ARAM_SIZE);
 }
 
 void aram_free(void) {
-    free(g_aram);
+    pd_free(g_aram, ARAM_SIZE);
     g_aram = NULL;
+}
+
+/* Where this memory lives, so rollback can snapshot it by tracked page rather
+ * than copying all 16 MB every frame. */
+void* aram_buffer(size_t* size) {
+    if (size) *size = ARAM_SIZE;
+    return g_aram;
 }
 
 bool aram_contains(u32 ea) {
@@ -68,7 +80,8 @@ void aram_dma_to_ram(u8* ram, u32 ram_addr, u32 aram_addr, u32 length) {
         ram[r + i] = g_aram[(off + i) & (ARAM_SIZE - 1u)];
 }
 
-/* Native rollback owns the destination; ARAM has no pointers or pending work. */
+/* Native rollback owns the destination; ARAM has no pointers or pending work.
+ * Used only where page tracking is unavailable; see aram_buffer. */
 size_t aram_snapshot(void* bytes, int restore) {
     if (bytes && g_aram) {
         if (restore) memcpy(g_aram, bytes, ARAM_SIZE);

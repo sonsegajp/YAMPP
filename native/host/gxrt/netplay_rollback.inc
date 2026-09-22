@@ -6,16 +6,28 @@ extern size_t frontend_audio_snapshot(void*, int);
 extern size_t frontend_io_snapshot(void*, int);
 extern size_t frontend_bus_snapshot(void*, int);
 extern size_t aram_snapshot(void*, int);
+extern void* aram_buffer(size_t*);
 extern size_t hooks_rollback_snapshot(void*, int);
+#include "pagedelta.h"
+/* Guest RAM and ARAM are 40 of the 42 MB a snapshot used to be, and page
+ * tracking carries them separately -- see pagedelta.h. Where it is
+ * unavailable, ARAM stays in this blob and guest RAM stays in the copy below,
+ * exactly as before. */
 static size_t rollback_host_state(void* data, int restore) {
   unsigned char* bytes = data; size_t n = 0;
   n += frontend_audio_snapshot(bytes ? bytes + n : NULL, restore);
   n += frontend_io_snapshot(bytes ? bytes + n : NULL, restore);
   n += frontend_bus_snapshot(bytes ? bytes + n : NULL, restore);
-  n += aram_snapshot(bytes ? bytes + n : NULL, restore);
+  if (!pd_active()) n += aram_snapshot(bytes ? bytes + n : NULL, restore);
   n += hooks_rollback_snapshot(bytes ? bytes + n : NULL, restore);
   return n;
 }
+/* Bytes of guest RAM inside a snapshot buffer: none once page tracking owns
+ * it. Everything after the Context is laid out from here. */
+static size_t rollback_bulk_bytes(const Context* ctx) {
+  return pd_active() ? 0 : ctx->ram_size;
+}
+static unsigned rollback_slot(uint32_t frame) { return frame % (RB_WINDOW + 1); }
 #define RB_SCENE 0x80479D58u
 #define RB_PAUSE (RB_SCENE + 0x10u)
 
@@ -151,24 +163,32 @@ static void rollback_simulate(Context* ctx, uint32_t on_frame, uint32_t frame) {
 
 extern size_t frontend_thread_checkpoint(void*);
 extern int frontend_thread_checkpoint_matches(const void*);
+extern int frontend_thread_checkpoint_restore(const void*);
 static void rollback_save(Context* ctx, uint32_t frame) {
   costume_art_frame_done(ctx); /* never snapshot transient presentation pixels */
   unsigned char* buffer = rb_save_buffer(&rollback, frame);
+  size_t bulk = rollback_bulk_bytes(ctx);
   memcpy(buffer, ctx, sizeof *ctx);
-  memcpy(buffer + sizeof *ctx, ctx->ram, ctx->ram_size);
-  size_t host_size = rollback_host_state(buffer + sizeof *ctx + ctx->ram_size, 0);
-  size_t scheduler_size = frontend_thread_checkpoint(buffer + sizeof *ctx + ctx->ram_size + host_size);
-  memcpy(buffer + sizeof *ctx + ctx->ram_size + host_size + scheduler_size, &rollback_clock, sizeof rollback_clock);
+  if (bulk) memcpy(buffer + sizeof *ctx, ctx->ram, bulk);
+  else pd_save(rollback_slot(frame));
+  size_t host_size = rollback_host_state(buffer + sizeof *ctx + bulk, 0);
+  size_t scheduler_size = frontend_thread_checkpoint(buffer + sizeof *ctx + bulk + host_size);
+  memcpy(buffer + sizeof *ctx + bulk + host_size + scheduler_size, &rollback_clock, sizeof rollback_clock);
 }
 static int rollback_restore(Context* ctx, uint32_t frame) {
   costume_art_frame_done(ctx);
   const unsigned char* buffer = rb_load_buffer(&rollback, frame);
   if (!buffer) return 0;
-  const unsigned char* scheduler = buffer + sizeof *ctx + ctx->ram_size + rollback_host_state(NULL, 0);
-  /* Resuming or waking another thread can mutate native scheduler state even
-   * without switching stacks. Require both metadata and continuations unchanged. */
-  if (!frontend_thread_checkpoint_matches(scheduler)) {
-    fprintf(stderr, "[netplay] rollback refused: native scheduler changed after snapshot\n");
+  size_t bulk = rollback_bulk_bytes(ctx);
+  const unsigned char* scheduler = buffer + sizeof *ctx + bulk + rollback_host_state(NULL, 0);
+  /* Scheduler bookkeeping is rewound with everything else; only a thread that
+   * actually ran, or one that has since appeared or gone, makes a restore
+   * impossible. See frontend_thread_checkpoint_restore for why refusing here
+   * was worse than the problem it was avoiding. */
+  if (!frontend_thread_checkpoint_restore(scheduler)) {
+    static unsigned refused;
+    if (!refused++)
+      fprintf(stderr, "[netplay] rollback refused: a guest thread ran, or started, since the snapshot\n");
     return 0;
   }
   /* GPU submission is external to simulation. Keep the current SDK GX cache,
@@ -178,11 +198,12 @@ static int rollback_restore(Context* ctx, uint32_t frame) {
   memcpy(gx, ctx->ram + 0x4A76C8, sizeof gx);
   memcpy(vi, ctx->ram + 0x4C1D80, sizeof vi);
   memcpy(draw, ctx->ram + 0x4D7320, sizeof draw);
-  memcpy(&rollback_clock, buffer + sizeof *ctx + ctx->ram_size + rollback_host_state(NULL, 0) + frontend_thread_checkpoint(NULL), sizeof rollback_clock);
+  memcpy(&rollback_clock, buffer + sizeof *ctx + bulk + rollback_host_state(NULL, 0) + frontend_thread_checkpoint(NULL), sizeof rollback_clock);
   uint64_t now = rollback_clock;
-  memcpy(ctx->ram, buffer + sizeof *ctx, ctx->ram_size);
+  if (bulk) memcpy(ctx->ram, buffer + sizeof *ctx, bulk);
+  else pd_restore(rollback_slot(frame));
   memcpy(ctx, buffer, sizeof *ctx); ctx->timebase = now;
-  rollback_host_state((void*)(buffer + sizeof *ctx + ctx->ram_size), 1);
+  rollback_host_state((void*)(buffer + sizeof *ctx + bulk), 1);
   memcpy(ctx->ram + 0x4A76C8, gx, sizeof gx);
   memcpy(ctx->ram + 0x4C1D80, vi, sizeof vi);
   memcpy(ctx->ram + 0x4D7320, draw, sizeof draw);
@@ -297,8 +318,23 @@ void netplay_scene_loop(Context* ctx) {
   uint32_t on_frame = ctx->gpr[3];
   uint8_t ports = 0;
   for (unsigned p = 0; p < 4; ++p) if (np.port_ids[p]) ports |= (uint8_t)(1u << p);
-  size_t state_size = rollback_match ? sizeof *ctx + ctx->ram_size + rollback_host_state(NULL, 0) + frontend_thread_checkpoint(NULL) + sizeof rollback_clock : 1;
+  /* Offer the two large memories to the page tracker before the buffer is
+   * sized: if it takes them, they leave the buffer entirely and a saved frame
+   * costs a few hundred kilobytes instead of forty megabytes. */
+  pd_shutdown(); pd_clear_regions();
+  if (rollback_match) {
+    size_t aram_size = 0;
+    void* aram = aram_buffer(&aram_size);
+    if (pd_add_region(ctx->ram, ctx->ram_size) && (!aram || pd_add_region(aram, aram_size)))
+      pd_init(RB_WINDOW + 1);
+    if (!pd_active()) {
+      pd_shutdown();
+      fprintf(stderr, "[rollback] page tracking unavailable; snapshots copy whole memories\n");
+    }
+  }
+  size_t state_size = rollback_match ? sizeof *ctx + rollback_bulk_bytes(ctx) + rollback_host_state(NULL, 0) + frontend_thread_checkpoint(NULL) + sizeof rollback_clock : 1;
   if (!rb_init(&rollback, ports, state_size)) {
+    pd_shutdown();
     end_session("Not enough memory for rollback");
     rollback_abort_scene(ctx); call_guest(ctx, 0x8037639Cu, 0); return;
   }
@@ -320,7 +356,9 @@ void netplay_scene_loop(Context* ctx) {
     }
   }
   unlock();
-  if (rollback_match) fprintf(stderr, "[netplay] rollback enabled: window=%d, snapshot=%zu bytes\n", RB_WINDOW, rollback.state_size);
+  if (rollback_match) fprintf(stderr, "[netplay] rollback enabled: window=%d, snapshot=%zu bytes%s\n",
+                              RB_WINDOW, rollback.state_size,
+                              pd_active() ? " plus the pages that changed" : "");
   else fprintf(stderr, "[netplay] synchronized scene driver: epoch=%d\n", np.epoch);
   Context caller = *ctx;
   /* Own the same 80-byte guest stack frame as the original scene driver, so
@@ -440,7 +478,7 @@ void netplay_scene_loop(Context* ctx) {
   fprintf(stderr, "[netplay] rollback totals: corrections=%u replayed=%u declined=%u clock-skips=%u\n",
           rollback.rollback_count, rollback.replayed_frames, rollback_declined, clock_skips);
   costume_art_frame_done(ctx);
-  lock(); rollback_running = 0; unlock(); rb_destroy(&rollback);
+  lock(); rollback_running = 0; unlock(); rb_destroy(&rollback); pd_shutdown();
   /* Do not treat the switch back to the host clock as elapsed audio time. */
   frontend_audio_rebase(frontend_guest_timebase());
   if (!np.active) rollback_abort_scene(ctx);

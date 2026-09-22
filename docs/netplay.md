@@ -43,8 +43,58 @@ and animation inspection in its editor.
 
 ## How input reaches the other player
 
-Input takes whichever of two paths is working, and the in-match readout says
-which: `direct` for datagrams, `relayed` for the lobby stream.
+Rooms, matchmaking, rules, compatibility checks and the session itself are the
+server's job and stay there. The match traffic does not have to be, and by
+default it is not: once the two players have proven they can reach each other,
+their input goes straight between them and the server is no longer in the path.
+The in-match readout says which of three routes is in use:
+
+| readout | what it means |
+| --- | --- |
+| `peer to peer` | input goes straight to the other player |
+| `via server` | datagrams, relayed |
+| `via server (stream)` | the lobby connection, relayed |
+
+### Reaching the other player directly
+
+The server is the only party that knows the two clients are in the same
+session, so it is the only one that can introduce them. When a session starts
+it tells each player the other's address -- the public one it observed their
+datagrams arriving from, and the private one they reported for their own
+network -- together with a token.
+
+The token is what makes an unknown address believable. Each player is issued
+one per session, and it is given only to the players sharing that session. A
+datagram sent straight to a player carries *their* token in front of it, so
+holding it is proof the server put you in a match with them. Nothing is
+accepted on the strength of a source address, which cannot be trusted and
+which a NAT may renumber without warning. A new session issues new tokens, so
+leaving a match ends the right to send to the player who was in it.
+
+Both clients send to each other's addresses at the same time, roughly four
+times a second. The first packet out of each router is usually dropped by the
+other, and the second gets through the hole the first one made. Probing
+continues for the life of the session to keep the mapping open. A path that
+stops answering for two seconds is abandoned and that player's traffic goes
+back through the relay, which never went away.
+
+Nothing about this is required. A pair that cannot reach each other -- a
+symmetric NAT on both ends, a hostile network -- plays exactly as before,
+through the server, and the only cost is the probes. `MELEE_NETPLAY_RELAY_ONLY=1`
+keeps every packet on the server, which is also what to set if you would rather
+the other player's client did not learn your address.
+
+### Why the direct path is worth it
+
+Relayed input travels to the server and then to the other player, so the round
+trip between two players is the sum of both of their round trips to it. Going
+straight between them removes that entirely, and it is the delay the automatic
+input delay is sized from, so the match is not merely smoother -- it runs on
+fewer frames of delay.
+
+### The relayed paths
+
+Input takes whichever of two relayed paths is working when a direct one is not.
 
 The lobby connection always works, because it is a port the server already
 answers on, and it is what carries rooms, rules and match setup. It is a poor
@@ -145,7 +195,21 @@ explicit callable frame step. Local inputs are delayed by the room's selected
 number of frames. Missing remote inputs are predicted from earlier inputs.
 The engine retains an eight-frame rewind window with nine snapshot slots.
 Snapshots include CPU registers, game RAM, ARAM, audio state and deferred
-device work. When a late input differs from its prediction, it restores the
+device work.
+
+Guest RAM and ARAM are forty of the roughly forty-two megabytes that
+describes, and copying them whole for every simulated frame cost about two and
+a half gigabytes a second before a single correction was replayed -- felt as a
+stutter, and expensive twice over because it evicted the cache the emulation
+was about to use. Almost none of those megabytes change between two frames, so
+they are now carried by page instead: both memories are reserved so the
+hardware records which pages were written, and a snapshot copies only those.
+The stored images are still whole, so a restore is still a straight copy of a
+complete state; only the work of maintaining them changed. The fixed part of a
+snapshot is about 217 KB. A file read landing directly in guest RAM is the one
+write the hardware does not see, so that path reports itself explicitly.
+`native/host/gxrt/tests/pagedelta_test.c` checks thousands of random writes,
+saves and restores against a full-copy model. When a late input differs from its prediction, it restores the
 corresponding frame and replays simulation with corrected input. Only the resulting frame is
 presented. If confirmation falls beyond the eight-frame window, simulation
 waits instead of overwriting required history.
@@ -169,6 +233,29 @@ so an input handed over by the simulation leaves on the same pass and an
 arriving packet is picked up as soon as the socket has it. Stalled frames
 request missing input again and resend recent history without extending the
 prediction window.
+
+### Rewinding the guest scheduler
+
+A snapshot cannot rewind a native call stack, so a correction has to establish
+that none of them moved. The HLE scheduler is cooperative: one guest thread
+runs at a time and the rest are parked, so a stack can only have moved if its
+thread was handed control, and every hand-off increments a counter. An
+unchanged counter is proof that every parked continuation is where the snapshot
+left it.
+
+What can still differ is bookkeeping the running thread changed by itself -- a
+thread resumed, suspended, or woken from a queue. Those are plain fields, they
+describe the simulation being rewound, and they are restored with everything
+else. This used to refuse the correction instead, which was the more dangerous
+choice: the retrace wake moves a sleeper to ready on *every video frame*, so
+refusing was the ordinary case rather than a rare one. A refused correction is
+not a skipped optimisation -- the machine has already simulated frames on
+predictions that turned out wrong, and declining to replay them leaves it
+permanently disagreeing with its opponent. Content that streams more woke those
+threads more often and so diverged sooner.
+
+A thread that actually ran, or one that has appeared or exited since the
+snapshot, is still refused; there is no native stack to put back for either.
 
 Online audio advances by one fixed 60 Hz slice per simulation frame. Replay
 restores the simulated audio state without submitting duplicate sound to the

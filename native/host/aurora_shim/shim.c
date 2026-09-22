@@ -29,6 +29,7 @@
 #include <string.h>
 #include <aurora/aurora.h>
 #include <aurora/event.h>
+#include <aurora/gfx.h>
 #include <dolphin/gx.h>
 #include <dolphin/gx/GXCommandList.h>
 #include <dolphin/gx/GXAurora.h>
@@ -252,13 +253,9 @@ AUSHIM_API int aushim_init_backend(unsigned width, unsigned height,
     cfg.windowHeight  = height ? height : 480;
     cfg.msaa          = 1;
     cfg.maxTextureAnisotropy = 1;
-    /* vsync OFF: the emulation core already paces to 60Hz (GCN_THROTTLE),
-     * and stacking swapchain vsync on top makes every frame that misses a
-     * vblank wait for the next one â€” on a visible window this snapped
-     * delivered frame times from ~17-25ms capacity to ~46ms (measured in
-     * the user's sessions), while occluded bench windows dodged the wait
-     * and hid the whole effect.  One pacer, not two.  GCN_AURORA_VSYNC=1
-     * re-enables for A/B. */
+    /* Presentation starts unsynchronised and is decided once the display has
+     * been identified; see aushim_display_refresh_hz and the note above it.
+     * GCN_AURORA_VSYNC forces either answer for A/B. */
     {
         const char* vs = getenv("GCN_AURORA_VSYNC");
         cfg.vsync = (vs && vs[0] == '1');
@@ -424,6 +421,35 @@ AUSHIM_API int aushim_update_status(void)
 }
 
 AUSHIM_API void aushim_update(void) { (void)aushim_update_status(); }
+
+/* The display's refresh rate in hundredths of a hertz, or 0 when it cannot
+ * be determined. Hundredths because the rates that matter here are 59.94 and
+ * 119.88 as often as they are 60 and 120, and rounding them to whole hertz
+ * loses exactly the difference this is being asked about. */
+AUSHIM_API int aushim_display_refresh_hz(void)
+{
+    if (!s_initialized || !s_sdl_window) return 0;
+    {
+        SDL_DisplayID display = SDL_GetDisplayForWindow((SDL_Window*)s_sdl_window);
+        const SDL_DisplayMode* mode = display ? SDL_GetCurrentDisplayMode(display) : NULL;
+        if (!mode || mode->refresh_rate <= 0.0f) return 0;
+        return (int)(mode->refresh_rate * 100.0f + 0.5f);
+    }
+}
+
+/* Turn tearing off once the caller has decided the panel can take it. Kept
+ * separate from startup because the display is not known until the window
+ * exists, and because the caller -- which owns the frame pacing -- is the only
+ * thing that can say whether a blocking present would be a second pacer. */
+AUSHIM_API void aushim_set_vsync(int enabled)
+{
+    if (!s_initialized) return;
+    {
+        const char* vs = getenv("GCN_AURORA_VSYNC");
+        if (vs && (vs[0] == '0' || vs[0] == '1')) return;   /* the operator decided */
+    }
+    aurora_enable_vsync(enabled ? true : false);
+}
 
 AUSHIM_API int aushim_begin_frame(void)
 {

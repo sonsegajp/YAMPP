@@ -76,10 +76,17 @@ extern "C" AUSHIM_API void aushim_netplay_menu() {
                ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing);
   const ImVec4 good(.68f, .91f, .43f, 1), warn(1, .8f, .3f, 1), bad(1, .4f, .4f, 1), dim(.72f, .77f, .85f, 1);
   ImGui::TextColored(good, "ONLINE   delay %d%s", ui->delay, ui->rules.delay ? "" : " auto");
+  // Which way the inputs are actually travelling. "peer to peer" means the
+  // server is no longer in the path at all, which is the difference the
+  // player feels; the two relayed states differ only in how a lost packet is
+  // repaired, and both are worth distinguishing when a connection is poor.
+  const char* route = ui->direct_peers ? "peer to peer"
+                    : ui->udp_active ? "via server"
+                    : "via server (stream)";
   if (ui->ping_ms >= 0)
-    ImGui::TextColored(dim, "%d ms   %s", ui->ping_ms, ui->udp_active ? "direct" : "relayed");
+    ImGui::TextColored(dim, "%d ms   %s", ui->ping_ms, route);
   else
-    ImGui::TextColored(dim, "measuring link   %s", ui->udp_active ? "direct" : "relayed");
+    ImGui::TextColored(dim, "measuring link   %s", route);
   if (ui->interrupted) {
     // A countdown, not a spinner: the player can see whether to wait.
     const float left = (ui->interrupt_limit_ms - ui->interrupt_ms) / 1000.f;

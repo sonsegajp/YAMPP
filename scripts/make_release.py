@@ -103,6 +103,8 @@ def main():
     ap.add_argument('--python-runtime', default='build/distribution-python-content')
     ap.add_argument('--content-importer', default='build/modkit/mex-content-portable')
     ap.add_argument('--skip-workshop', action='store_true')
+    ap.add_argument('--version', help='Release this build is published as, e.g. 0.2.4. Recorded in the '
+                                     'manifest so the launcher can tell whether it is behind the server.')
     ap.add_argument('--zip', action='store_true')
     args = ap.parse_args()
     out = (ROOT / args.output).resolve()
@@ -159,7 +161,8 @@ def main():
             copy(source, out/'tools/modkit'/source.name)
     copy(ROOT/'tools/modkit/README.md', out/'tools/modkit/README.md')
     copy(ROOT/'tools/modkit/requirements.txt', out/'tools/modkit/requirements.txt')
-    for name in ('project_config.py','play_yampp.py','prepare_content_runtime.py','extract_disc.py','check_akaneia_content.py'):
+    for name in ('project_config.py','play_yampp.py','prepare_content_runtime.py','extract_disc.py',
+                 'check_akaneia_content.py','update_yampp.py'):
         copy(ROOT/'scripts'/name,out/'scripts'/name)
     copy(ROOT/'server/mod_repository.py', out/'server/mod_repository.py')
     for name in ('upstream_builds.py', 'upstream_builds.json'):
@@ -197,8 +200,13 @@ def main():
     ]), encoding='utf-8')
     check_setup_entrypoint(out)
     entries = audit(out)
-    (out/'distribution-manifest.json').write_text(json.dumps({'name':'Yet Another Melee PC Port',
-        'shortName':'YAMPP', 'files':entries}, indent=2), encoding='utf-8')
+    manifest={'name':'Yet Another Melee PC Port','shortName':'YAMPP'}
+    # The launcher compares this with what the master server reports. Without
+    # it the updater does nothing at all, which is the right answer for a
+    # folder that was assembled by hand rather than published.
+    if args.version: manifest['release']=args.version
+    manifest['files']=entries
+    (out/'distribution-manifest.json').write_text(json.dumps(manifest, indent=2), encoding='utf-8')
     print('Verified local distribution:', out, 'files:', len(entries))
     if args.zip:
         archive = out.parent / (out.name + '.zip')

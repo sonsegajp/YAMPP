@@ -45,6 +45,15 @@ PROTOCOL_VERSION = 2
 # Bumped from rollback-v1: input packets now carry the sender's frame
 # advantage, which the peers use to keep their clocks together.
 SYNC_ENGINE = "rollback-v2"
+# The release this server is running, which is the one its players need: a
+# room only admits clients whose build fingerprint matches, so an out-of-date
+# client cannot play here at all. Reported over the HTTP API so a launcher can
+# update before the player finds that out from a rejection.
+#
+# It is a version, not a location. The client builds the download address from
+# its own pinned repository, so a server -- compromised, impersonated or merely
+# misconfigured -- can say "you are out of date" and nothing more.
+CLIENT_RELEASE = "0.2.4"
 UDP_TOKEN_CHARS = 32
 # The stream is framed; a datagram is not, so it carries the token in front.
 UDP_MIN_BYTES = UDP_TOKEN_CHARS + HEADER.size + 1
@@ -75,6 +84,15 @@ class Client:
         # this client's match traffic, and it may change at any time.
         self.udp_token = secrets.token_hex(UDP_TOKEN_CHARS // 2)
         self.udp_addr = None
+        # What a datagram sent straight to this client must carry in front of
+        # it. Given only to the players sharing its session, and reissued for
+        # every session, so leaving a match retires the right to send to it.
+        self.peer_token = secrets.token_hex(UDP_TOKEN_CHARS // 2)
+        # The address this client has on its own network. Two players behind
+        # one router reach each other here and nowhere else, because the
+        # public address of both is the same router, which will usually not
+        # send a packet back in through itself.
+        self.local_addr = None
         self.udp_window = 0.0
         self.udp_in_window = 0
         # Round trip this client last measured to this server. Input is
@@ -178,6 +196,26 @@ def automatic_delay(players):
         one_way = halves[-1] + halves[-2]
     frames = int(-(-one_way // FRAME_MS))
     return max(MIN_AUTO_DELAY, min(MAX_AUTO_DELAY, frames))
+
+
+def clean_endpoint(text):
+    """`text` if it is a bare numeric IPv4 address and port, else None.
+
+    A client sends this about itself and it is forwarded to its opponent, so
+    it is checked here rather than trusted: anything that is not four numbers
+    and a port is not an address the other client will dial, and a name would
+    turn into a lookup on someone else's machine.
+    """
+    if not isinstance(text, str) or len(text) > 32:
+        return None
+    host, _, port = text.rpartition(":")
+    parts = host.split(".")
+    if len(parts) != 4 or not port.isdigit() or not 0 < int(port) <= 65535:
+        return None
+    for part in parts:
+        if not part.isdigit() or len(part) > 3 or int(part) > 255:
+            return None
+    return text
 
 
 def clean_rules(rules):
@@ -372,6 +410,9 @@ class Server:
                    "udp_port": self.udp_port, "udp_token": client.udp_token}
         for player in room.players:
             player.send(message)
+        # The rejoining client has a new id and a new socket, so the address
+        # and token its opponent had for it are both stale.
+        self.announce_peers(room)
         log.info("room %d: %s rejoined session %d on port %d",
                  room.id, client.name, session, port + 1)
 
@@ -449,6 +490,15 @@ class Server:
             reported = message.get("rtt")
             if type(reported) is int and 0 <= reported <= 10000:
                 client.rtt_ms = reported
+            local = message.get("local")
+            if local is None or clean_endpoint(local) is not None:
+                # Held as the client wrote it, and only ever handed to the
+                # players in its own session. A private address is not secret,
+                # but it is not something to give to the whole lobby either.
+                if client.local_addr != local:
+                    client.local_addr = local
+                    if client.room is not None and client.room.session:
+                        self.announce_peers(client.room)
             client.send({"op": "pong"})
         elif op == "list":
             client.send(self.room_list())
@@ -608,7 +658,13 @@ class Server:
                          "rules": room.rules, "players": [{"id": p.id, "port": p.port} for p in room.players],
                          "required_mods": room.required_mods, "compatibility": room.compatibility, "upstream_build": room.upstream_build}
                 for p in room.players:
+                    # A fresh token for every session: the right to send
+                    # straight to a player lasts exactly as long as the match
+                    # they agreed to, and a past opponent keeps nothing.
+                    p.peer_token = secrets.token_hex(UDP_TOKEN_CHARS // 2)
+                for p in room.players:
                     p.send(start)
+                self.announce_peers(room)
                 self.broadcast_rooms()
                 log.info("session %d started in room %d, delay %d%s", room.session, room.id,
                          delay, " (automatic)" if not room.rules["delay"] else "")
@@ -638,6 +694,13 @@ class Server:
             path = path[len("/api"):]
         else:
             return await self.http_json(writer, 404, {"error": "Unknown API route"})
+        if path == "/version" and method in ("GET", "HEAD"):
+            # Answered before anything optional, because a client that needs
+            # updating is exactly the client whose other requests will fail.
+            return await self.http_json(writer, 200, {
+                "schema": 1, "release": CLIENT_RELEASE,
+                "protocol": PROTOCOL_VERSION, "sync": SYNC_ENGINE,
+            }, method == "HEAD")
         if not self.repository:
             return await self.http_json(writer, 503, {"error": "Costume repository is unavailable"})
         if path == "/mods" and method in ("GET", "HEAD"):
@@ -790,6 +853,33 @@ class Server:
                 pass
             log.info("client %d disconnected", client.id)
 
+    def announce_peers(self, room):
+        """Give each player in a live session the others' addresses and tokens.
+
+        Sent when a session starts and again whenever an address is learned or
+        changes, because the public one is only known once a client's first
+        datagram has arrived and a NAT may renumber it at any time. A player
+        whose address is not known yet is simply left out of the list and
+        appears in a later one.
+        """
+        if not room.session:
+            return
+        for client in room.players:
+            peers = []
+            for other in room.players:
+                if other is client:
+                    continue
+                entry = {"id": other.id, "port": other.port, "token": other.peer_token}
+                if other.udp_addr is not None:
+                    entry["addr"] = "%s:%d" % (other.udp_addr[0], other.udp_addr[1])
+                if other.local_addr:
+                    entry["local"] = other.local_addr
+                if "addr" in entry or "local" in entry:
+                    peers.append(entry)
+            if peers:
+                client.send({"op": "peers", "session": room.session,
+                             "token": client.peer_token, "peers": peers})
+
     def forward(self, client, data, payload=None):
         """Forward one packed input packet to the rest of the session.
 
@@ -855,6 +945,10 @@ class Server:
         if client.udp_addr != addr:
             client.udp_addr = addr
             log.info("client %d reachable by datagram at %s", client.id, addr[0])
+            # The address the other player needs in order to stop going
+            # through here is the one that just arrived.
+            if client.room is not None and client.room.session:
+                self.announce_peers(client.room)
         self.forward(client, datagram[UDP_TOKEN_CHARS:])
 
 
