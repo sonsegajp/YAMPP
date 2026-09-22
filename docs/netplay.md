@@ -58,10 +58,17 @@ The in-match readout says which of three routes is in use:
 ### Reaching the other player directly
 
 The server is the only party that knows the two clients are in the same
-session, so it is the only one that can introduce them. When a session starts
-it tells each player the other's address -- the public one it observed their
-datagrams arriving from, and the private one they reported for their own
-network -- together with a token.
+session, so it is the only one that can introduce them. That introduction is a
+lobby message on the connection it already has; the server needs no datagram
+port of its own, and the public service does not run one.
+
+Each client discovers its own address the way anything behind a NAT has to:
+one STUN request from the very socket the match will use, because a NAT
+mapping belongs to a socket and an address discovered on another one would
+name a hole the match cannot use. When a session starts, each player is told
+the other's addresses -- the mapping it discovered for itself, the address the
+server observed if it happens to relay datagrams too, and the private address
+on its own network -- together with a token.
 
 The token is what makes an unknown address believable. Each player is issued
 one per session, and it is given only to the players sharing that session. A
@@ -70,6 +77,12 @@ holding it is proof the server put you in a match with them. Nothing is
 accepted on the strength of a source address, which cannot be trusted and
 which a NAT may renumber without warning. A new session issues new tokens, so
 leaving a match ends the right to send to the player who was in it.
+
+`MELEE_NETPLAY_STUN` chooses the STUN server; the default is a public one, and
+a request to it reveals this machine's address to that server, as any such
+lookup must. Without one, only the private address can be offered, so two
+players on the same network still reach each other and everyone else stays on
+the relay.
 
 Both clients send to each other's addresses at the same time, roughly four
 times a second. The first packet out of each router is usually dropped by the

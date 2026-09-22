@@ -200,6 +200,9 @@ def main():
                         help='Track the custom audio replaces, as its file stem or display name '
                              '(the game looks for a folder of that name). Required with --host-music '
                              'or --join-music.')
+    parser.add_argument('--no-relay-udp', action='store_true',
+                        help="Run the test relay without a datagram port, as the public service "
+                             "does. Reaching the other player must not depend on it.")
     parser.add_argument('--relay-only', action='store_true',
                         help='Keep both clients on the server path. Implied by the impairment options, '
                              'which impair the server and would otherwise measure a path nobody is using.')
@@ -271,6 +274,7 @@ def main():
     port = free_port()
     server_log = (out / 'server.log').open('w')
     server = None if args.server else subprocess.Popen([sys.executable, str(ROOT / 'scripts/netplay_test_server.py'),
+                               *(['--udp-port', '0'] if args.no_relay_udp else []),
                                '--port', str(port), '--delay-ms', str(args.relay_delay_ms),
                                '--jitter-ms', str(args.relay_jitter_ms),'--stall-ms',str(args.relay_stall_ms),'--mods-dir',str(repository)],
                               stdout=server_log, stderr=subprocess.STDOUT)

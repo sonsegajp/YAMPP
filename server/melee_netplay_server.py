@@ -93,6 +93,12 @@ class Client:
         # public address of both is the same router, which will usually not
         # send a packet back in through itself.
         self.local_addr = None
+        # The mapping this client discovered for itself through its NAT. It is
+        # how two players on different networks reach each other when this
+        # server has no datagram relay of its own to observe them with, which
+        # is the ordinary case: introducing them is a lobby job, not a
+        # datagram one.
+        self.public_addr = None
         self.udp_window = 0.0
         self.udp_in_window = 0
         # Round trip this client last measured to this server. Input is
@@ -490,6 +496,11 @@ class Server:
             reported = message.get("rtt")
             if type(reported) is int and 0 <= reported <= 10000:
                 client.rtt_ms = reported
+            public = message.get("public")
+            if public is not None and clean_endpoint(public) is not None and client.public_addr != public:
+                client.public_addr = public
+                if client.room is not None and client.room.session:
+                    self.announce_peers(client.room)
             local = message.get("local")
             if local is None or clean_endpoint(local) is not None:
                 # Held as the client wrote it, and only ever handed to the
@@ -871,10 +882,13 @@ class Server:
                     continue
                 entry = {"id": other.id, "port": other.port, "token": other.peer_token}
                 if other.udp_addr is not None:
+                    # Observed directly, so trusted over anything reported.
                     entry["addr"] = "%s:%d" % (other.udp_addr[0], other.udp_addr[1])
+                if other.public_addr:
+                    entry["public"] = other.public_addr
                 if other.local_addr:
                     entry["local"] = other.local_addr
-                if "addr" in entry or "local" in entry:
+                if len(entry) > 3:
                     peers.append(entry)
             if peers:
                 client.send({"op": "peers", "session": room.session,

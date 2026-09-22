@@ -95,10 +95,18 @@ extern int aurora_link_aspect_lock(int command);
 /* A direct path that has gone this long without a packet is abandoned and its
  * peer goes back through the relay, which is always still there. */
 #define NP_DIRECT_QUIET_MS 2000
-/* One public address as the server observed it, one private address the peer
- * reported: the second is what lets two players on the same network reach
- * each other without leaving it. */
-#define NP_CANDIDATES 2
+/* The addresses a peer might answer on: the mapping it discovered for itself
+ * through its NAT, the address the server happened to observe if it has a
+ * datagram relay at all, and the private address on its own network, which is
+ * what lets two players behind one router reach each other without leaving
+ * it. All are tried at once; whichever answers is the one that works. */
+#define NP_CANDIDATES 3
+/* Asking a public STUN server what address this machine's datagrams appear to
+ * come from. It is one request and one reply, from the same socket the match
+ * will use, because a NAT mapping belongs to a socket. */
+#define NP_STUN_MAGIC 0x2112A442u
+#define NP_STUN_RETRY_MS 900
+#define NP_STUN_REFRESH_MS 25000
 #define NP_MAGIC 0x4D4C4E50u   /* 'MLNP' */
 #define NP_DEFAULT_PORT 7420
 /* The public hostname is safe to distribute. Deployment-specific routing is
@@ -225,6 +233,17 @@ static struct {
    * the server passes to the other player as a second thing to try. */
   char peer_token[NP_UDP_TOKEN + 1];
   char local_udp[64];
+  /* This machine's address as the rest of the internet sees it, discovered by
+   * STUN. Empty until the first reply arrives, which is why it is re-reported
+   * with every heartbeat rather than once. */
+  char public_udp[64];
+  struct sockaddr_in stun_addr;
+  int stun_ready;
+  DWORD stun_sent, stun_got;
+  unsigned char stun_txid[12];
+  /* Whether the server offered a datagram relay. Independent of the socket,
+   * which exists for the other player regardless. */
+  int udp_relay;
   int direct_peers;
   /* Set once at startup. Off means every packet keeps going through the
    * server, which costs the extra hop and keeps this machine's address
@@ -584,7 +603,7 @@ static void udp_send(const void* payload, unsigned len) {
    * socket; send_lock is the same one the stream queue uses, and neither
    * caller holds it across anything that blocks. */
   EnterCriticalSection(&np.send_lock);
-  if (np.udp != INVALID_SOCKET && np.udp_token[0] && len + NP_UDP_TOKEN <= 1500) {
+  if (np.udp != INVALID_SOCKET && np.udp_relay && np.udp_token[0] && len + NP_UDP_TOKEN <= 1500) {
     unsigned char datagram[1500];
     memcpy(datagram, np.udp_token, NP_UDP_TOKEN);
     memcpy(datagram + NP_UDP_TOKEN, payload, len);
@@ -670,7 +689,8 @@ static void relay_send(const void* payload, unsigned len, uint16_t to) {
 static void udp_close(void) {
   EnterCriticalSection(&np.send_lock);
   if (np.udp != INVALID_SOCKET) { closesocket(np.udp); np.udp = INVALID_SOCKET; }
-  np.udp_ready = np.udp_offered = 0; np.udp_token[0] = 0;
+  np.udp_ready = np.udp_offered = np.udp_relay = 0; np.udp_token[0] = 0;
+  np.public_udp[0] = 0; np.stun_ready = 0;
   LeaveCriticalSection(&np.send_lock);
   /* The socket the punched mappings belonged to is gone, so the paths are
    * too; they are re-proven on the new one. */
@@ -680,10 +700,11 @@ static void udp_close(void) {
 }
 /* Open the side channel the server advertised. Failure is not an error: the
  * stream path stays in place and nothing about the match changes. */
+/* The socket both paths share. `port` is the server's datagram relay, or 0
+ * when it does not run one -- which changes nothing about reaching the other
+ * player, and only means relayed packets keep to the lobby stream. */
 static void udp_open(const char* token, int port) {
   udp_close();
-  if (!token || !*token || port <= 0 || port > 65535) return;
-  if (strlen(token) != NP_UDP_TOKEN) return;
   np.udp = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
   if (np.udp == INVALID_SOCKET) return;
 #ifdef _WIN32
@@ -695,10 +716,16 @@ static void udp_open(const char* token, int port) {
   { int flags = fcntl(np.udp, F_GETFL, 0); if (flags >= 0) fcntl(np.udp, F_SETFL, flags | O_NONBLOCK); }
 #endif
   EnterCriticalSection(&np.send_lock);
-  np.udp_addr = np.server_addr; np.udp_addr.sin_port = htons((unsigned short)port);
-  memcpy(np.udp_token, token, NP_UDP_TOKEN); np.udp_token[NP_UDP_TOKEN] = 0;
+  np.udp_addr = np.server_addr;
+  np.udp_relay = port > 0 && port <= 65535 && token && strlen(token) == NP_UDP_TOKEN;
+  if (np.udp_relay) {
+    np.udp_addr.sin_port = htons((unsigned short)port);
+    memcpy(np.udp_token, token, NP_UDP_TOKEN); np.udp_token[NP_UDP_TOKEN] = 0;
+  } else {
+    np.udp_token[0] = 0;
+  }
   LeaveCriticalSection(&np.send_lock);
-  np.udp_offered = 1; np.udp_last_rx = np.udp_last_probe = GetTickCount();
+  np.udp_offered = np.udp_relay; np.udp_last_rx = np.udp_last_probe = GetTickCount();
   /* Bind now rather than on the first send, so the port is known and can be
    * offered to the other player while the session is still being set up. */
   { struct sockaddr_in any; memset(&any, 0, sizeof any);
@@ -724,7 +751,28 @@ static void udp_open(const char* token, int port) {
       closesocket(probe);
     }
   }
-  fprintf(stderr, "[netplay] datagram channel offered on port %d\n", port);
+  /* Ask what this socket looks like from outside. Answered asynchronously in
+   * udp_service; until it is, only the private address can be offered. */
+  np.public_udp[0] = 0; np.stun_ready = 0; np.stun_sent = 0; np.stun_got = 0;
+  { const char* configured = getenv("MELEE_NETPLAY_STUN");
+    char host[128]; unsigned short stun_port = 19302;
+    snprintf(host, sizeof host, "%s", configured && *configured ? configured : "stun.l.google.com:19302");
+    char* colon = strrchr(host, ':');
+    if (colon) { *colon = 0; int value = atoi(colon + 1); if (value > 0 && value <= 65535) stun_port = (unsigned short)value; }
+    struct addrinfo hints; memset(&hints, 0, sizeof hints);
+    hints.ai_family = AF_INET; hints.ai_socktype = SOCK_DGRAM;
+    struct addrinfo* found = NULL;
+    if (host[0] && !getaddrinfo(host, NULL, &hints, &found) && found) {
+      np.stun_addr = *(struct sockaddr_in*)found->ai_addr;
+      np.stun_addr.sin_port = htons(stun_port);
+      np.stun_ready = 1;
+    }
+    if (found) freeaddrinfo(found);
+    if (!np.stun_ready)
+      fprintf(stderr, "[netplay] no STUN server; only a private address can be offered\n");
+  }
+  if (np.udp_relay) fprintf(stderr, "[netplay] datagram channel offered on port %d\n", port);
+  else fprintf(stderr, "[netplay] no datagram relay; the socket serves the other player only\n");
 }
 static void close_sockets(void) {
   udp_close();
@@ -997,8 +1045,9 @@ static void handle_line(const char* line) {
     if (!nm.has_compat || (g_mex_active && !nm.has_upstream)) { disconnect("The server needs the current netplay update."); return; }
     np.local_id = (int)json_int(line, "id", 0);
     { char token[NP_UDP_TOKEN + 8]; json_str(line, "udp_token", token, sizeof token);
-      int udp_port = (int)json_int(line, "udp_port", 0);
-      if (udp_port > 0 && token[0]) udp_open(token, udp_port); }
+      /* Always: this socket is how the other player is reached, which has
+       * nothing to do with whether the server relays datagrams of its own. */
+      udp_open(token, (int)json_int(line, "udp_port", 0)); }
     if (np.resuming && np.session) {
       /* Reclaim the match we were already in rather than landing in the lobby. */
       char line_out[128];
@@ -1099,8 +1148,9 @@ static void handle_line(const char* line) {
       if (port >= 0 && port < 4 && id > 0 && id <= 65535) np.port_ids[port] = id;
     }
     { char token[NP_UDP_TOKEN + 8]; json_str(line, "udp_token", token, sizeof token);
-      int udp_port = (int)json_int(line, "udp_port", 0);
-      if (udp_port > 0 && token[0]) udp_open(token, udp_port); }
+      /* Always: this socket is how the other player is reached, which has
+       * nothing to do with whether the server relays datagrams of its own. */
+      udp_open(token, (int)json_int(line, "udp_port", 0)); }
     np.resuming = 0; np.last_rx = GetTickCount();
     lock(); np.ui.local_id = np.local_id; np.ui.reconnecting = 0; np.ui.phase = NETPLAY_PHASE_PLAYING; unlock();
     np_resume();
@@ -1126,6 +1176,9 @@ static void handle_line(const char* line) {
       int found = 0;
       json_str(entry, "addr", address, sizeof address);
       if (parse_endpoint(address, &peer->candidate[found])) ++found;
+      json_str(entry, "public", address, sizeof address);
+      if (found < NP_CANDIDATES && parse_endpoint(address, &peer->candidate[found])
+          && (!found || memcmp(&peer->candidate[found], &peer->candidate[0], sizeof peer->candidate[0]))) ++found;
       json_str(entry, "local", address, sizeof address);
       if (found < NP_CANDIDATES && parse_endpoint(address, &peer->candidate[found])) ++found;
       peer->candidates = found;
@@ -1302,6 +1355,64 @@ static void process_command(void) {
  * and re-register us if it changes. Traffic arriving here is the proof that
  * the path works in both directions, and its absence is the signal to fall
  * back to the stream before a single frame is lost to it. */
+/* One STUN binding request, from the match socket.
+ *
+ * It has to be this socket: a NAT mapping belongs to the socket that created
+ * it, so an address discovered on any other one would name a hole the match
+ * cannot use. */
+static void stun_request(DWORD now) {
+  if (!np.stun_ready || np.udp == INVALID_SOCKET) return;
+  unsigned char request[20];
+  request[0] = 0x00; request[1] = 0x01;            /* binding request */
+  request[2] = 0x00; request[3] = 0x00;            /* no attributes */
+  request[4] = 0x21; request[5] = 0x12; request[6] = 0xA4; request[7] = 0x42;
+  for (unsigned i = 0; i < 12; ++i) {
+    np.stun_txid[i] = (unsigned char)((now >> (i % 4 * 8)) ^ (i * 37u) ^ (unsigned)rand());
+    request[8 + i] = np.stun_txid[i];
+  }
+  np.stun_sent = now;
+  EnterCriticalSection(&np.send_lock);
+  sendto(np.udp, (const char*)request, sizeof request, 0,
+         (struct sockaddr*)&np.stun_addr, sizeof np.stun_addr);
+  LeaveCriticalSection(&np.send_lock);
+}
+
+/* The reply, if this datagram is one. The address is stored exclusive-ored
+ * with the magic cookie, which is what keeps a NAT that rewrites addresses in
+ * payloads from corrupting it on the way back. */
+static int stun_response(const unsigned char* data, int len, DWORD now) {
+  if (len < 20 || data[0] != 0x01 || data[1] != 0x01) return 0;
+  uint32_t magic = ((uint32_t)data[4] << 24) | ((uint32_t)data[5] << 16) | ((uint32_t)data[6] << 8) | data[7];
+  if (magic != NP_STUN_MAGIC) return 0;
+  if (memcmp(data + 8, np.stun_txid, 12)) return 0;
+  int at = 20, end = 20 + (((int)data[2] << 8) | data[3]);
+  if (end > len) end = len;
+  while (at + 4 <= end) {
+    unsigned type = ((unsigned)data[at] << 8) | data[at + 1];
+    unsigned size = ((unsigned)data[at + 2] << 8) | data[at + 3];
+    const unsigned char* value = data + at + 4;
+    if (at + 4 + (int)size > end) break;
+    if (type == 0x0020 && size >= 8 && value[1] == 0x01) {   /* XOR-MAPPED-ADDRESS, IPv4 */
+      unsigned port = (((unsigned)value[2] << 8) | value[3]) ^ (NP_STUN_MAGIC >> 16);
+      unsigned char address[4];
+      for (unsigned i = 0; i < 4; ++i)
+        address[i] = (unsigned char)(value[4 + i] ^ (unsigned char)(NP_STUN_MAGIC >> (24 - i * 8)));
+      char found[64];
+      snprintf(found, sizeof found, "%u.%u.%u.%u:%u",
+               address[0], address[1], address[2], address[3], port & 0xFFFFu);
+      if (strcmp(np.public_udp, found)) {
+        snprintf(np.public_udp, sizeof np.public_udp, "%s", found);
+        np.ping_reported = 0;     /* tell the server at the next heartbeat */
+        fprintf(stderr, "[netplay] this machine is reachable at %s\n", np.public_udp);
+      }
+      np.stun_got = now;
+      return 1;
+    }
+    at += 4 + (int)((size + 3u) & ~3u);
+  }
+  return 0;
+}
+
 /* A datagram that arrived with our own token in front of it came from a
  * player the server put in this session with us. The address it came from is
  * where that player is actually reachable -- which is not necessarily any of
@@ -1363,6 +1474,8 @@ static void udp_service(void) {
     /* Our own token in front means a player sent this straight to us. The
      * token is what decides, never the source address: a NAT gives no warning
      * before renumbering a mapping, and an address alone proves nothing. */
+    if (np.stun_ready && from.sin_addr.s_addr == np.stun_addr.sin_addr.s_addr
+        && from.sin_port == np.stun_addr.sin_port && stun_response(datagram, n, now)) continue;
     if (np.allow_direct && np.peer_token[0] && n >= (int)(NP_UDP_TOKEN + sizeof(RelayHeader))
         && !memcmp(datagram, np.peer_token, NP_UDP_TOKEN)) {
       RelayHeader h; memcpy(&h, datagram + NP_UDP_TOKEN, sizeof h);
@@ -1374,7 +1487,7 @@ static void udp_service(void) {
       handle_relay(datagram + NP_UDP_TOKEN, n - (int)NP_UDP_TOKEN);
       continue;
     }
-    if (from.sin_addr.s_addr != np.udp_addr.sin_addr.s_addr) continue;
+    if (!np.udp_relay || from.sin_addr.s_addr != np.udp_addr.sin_addr.s_addr) continue;
     np.udp_last_rx = now;
     if (!np.udp_ready) {
       np.udp_ready = 1;
@@ -1394,8 +1507,14 @@ static void udp_service(void) {
     lock(); if (np.direct_peers) --np.direct_peers; np.ui.direct_peers = np.direct_peers; unlock();
     fprintf(stderr, "[netplay] direct path to port %d went quiet; back through the server\n", p);
   }
+  /* Keep asking until answered, then re-ask occasionally: a NAT may drop the
+   * mapping or renumber it, and the address published to the other player has
+   * to be the one the mapping currently is. */
+  if (np.stun_ready && np.allow_direct
+      && now - np.stun_sent >= (DWORD)(np.public_udp[0] ? NP_STUN_REFRESH_MS : NP_STUN_RETRY_MS))
+    stun_request(now);
   punch_peers(now);
-  if (now - np.udp_last_probe >= NP_UDP_PROBE_MS) {
+  if (np.udp_relay && now - np.udp_last_probe >= NP_UDP_PROBE_MS) {
     np.udp_last_probe = now;
     if (!np.udp_ready) {
       /* Registration doubles as the probe: the server records the address the
@@ -1504,9 +1623,11 @@ static DWORD net_thread(LPVOID unused) {
           /* The private address rides along with the heartbeat rather than
            * getting a message of its own: the server needs it before a room
            * starts, and this is already the thing that arrives before one. */
-          char local[80] = "";
-          if (np.allow_direct && np.local_udp[0])
-            snprintf(local, sizeof local, ",\"local\":\"%s\"", np.local_udp);
+          char local[160] = "";
+          if (np.allow_direct && (np.local_udp[0] || np.public_udp[0]))
+            snprintf(local, sizeof local, "%s%s%s%s%s%s",
+                     np.local_udp[0] ? ",\"local\":\"" : "", np.local_udp, np.local_udp[0] ? "\"" : "",
+                     np.public_udp[0] ? ",\"public\":\"" : "", np.public_udp, np.public_udp[0] ? "\"" : "");
           if (np.ui.ping_ms >= 0 && !np.active) {
             snprintf(ping, sizeof ping, "{\"op\":\"ping\",\"rtt\":%d%s}", np.ui.ping_ms, local);
             np.ping_reported = 1;
